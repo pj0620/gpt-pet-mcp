@@ -1,17 +1,19 @@
 from launch import LaunchDescription
-from launch.actions import RegisterEventHandler, SetEnvironmentVariable
-from launch.event_handlers import OnProcessExit
-from launch.substitutions import Command, FindExecutable, PathJoinSubstitution
+from launch.actions import ExecuteProcess, SetEnvironmentVariable, TimerAction
+from launch.substitutions import Command
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 import os
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
 
 def generate_launch_description():
   nodes = []
-  
-  # Set QoS override file for sensor data compatibility
+
   pkg_path = get_package_share_directory('startup')
+
+  # Increase CycloneDDS MaxBlockedTime so service responses from the
+  # controller_manager aren't dropped when the 50 Hz control loop is busy.
+  cyclone_cfg = os.path.join(pkg_path, 'config', 'cyclonedds.xml')
+  nodes.append(SetEnvironmentVariable('CYCLONEDDS_URI', cyclone_cfg))
   # qos_override_file = os.path.join(pkg_path, 'config', 'qos_overrides.yaml')
   # qos_override = SetEnvironmentVariable(
   #   'RMW_QOS_OVERRIDES_FILE',
@@ -33,30 +35,36 @@ def generate_launch_description():
     }],
     output='both',
     remappings=[
-      ('/mecanum_drive_controller/reference', '/cmd_vel'),
+      ('/mecanum_drive_controller/reference_unstamped', '/cmd_vel'),
     ],
   )
-  joint_state_broadcaster_spawner = Node(
-    package='controller_manager',
-    executable='spawner',
-    arguments=['joint_state_broadcaster', '--controller-manager', '/controller_manager'],
+  spawner_script = os.path.join(
+    get_package_prefix('startup'), 'lib', 'startup', 'spawn_controllers.py',
   )
-  robot_controller_spawner = Node(
-    package='controller_manager',
-    executable='spawner',
-    arguments=['mecanum_drive_controller', '--controller-manager', '/controller_manager'],
+
+  # Custom spawner with 120s per-call timeout — the standard ros2_control
+  # spawner hardcodes 10s which is too short for DDS on the non-RT Jetson Nano.
+  # joint_state_broadcaster must be active before mecanum_drive_controller.
+  # JSB spawned at 15s; mecanum at 30s (gives JSB ~15s to complete its 3 calls).
+  # Server Nav2 is delayed 45s so mecanum is active before Nav2 starts.
+  spawn_joint_state = TimerAction(
+    period=15.0,
+    actions=[ExecuteProcess(
+      cmd=['python3', spawner_script, 'joint_state_broadcaster'],
+      output='screen',
+    )],
   )
-  # Delay start of robot_controller after joint_state_broadcaster
-  delay_robot_controller_spawner_after_joint_state_broadcaster_spawner = RegisterEventHandler(
-    event_handler=OnProcessExit(
-      target_action=joint_state_broadcaster_spawner,
-      on_exit=[robot_controller_spawner],
-    )
+  spawn_mecanum = TimerAction(
+    period=30.0,
+    actions=[ExecuteProcess(
+      cmd=['python3', spawner_script, 'mecanum_drive_controller'],
+      output='screen',
+    )],
   )
   nodes.extend([
     control_node,
-    joint_state_broadcaster_spawner,
-    delay_robot_controller_spawner_after_joint_state_broadcaster_spawner
+    spawn_joint_state,
+    spawn_mecanum,
   ])
   
   ## KINECT ##

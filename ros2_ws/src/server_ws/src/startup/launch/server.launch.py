@@ -1,8 +1,10 @@
 """
-v4 launch – wheel-odometry + EKF variant
-=========================================
-Odometry: mecanum_drive_controller wheel encoders + IMU fused by robot_localization EKF.
-SLAM:     slam_toolbox (async mapping) using fused odometry.
+server launch — EKF + SLAM + Nav2
+===================================
+Odometry:  mecanum_drive_controller wheel encoders + IMU fused by robot_localization EKF.
+SLAM:      slam_toolbox (async mapping) provides /map and map→odom TF.
+Nav2:      MPPI controller (holonomic/Omni), NavFn planner, lifecycle-managed.
+           Send goals via RViz "Nav2 Goal" button or NavigateToPose action.
 Starts a fresh map on every launch — no state is loaded or saved.
 """
 
@@ -11,7 +13,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -31,14 +34,32 @@ def generate_launch_description():
     nodes = []
 
     # ------------------------------------------------------------
-    # Clear any stale slam_toolbox map state from previous runs
+    # On every server launch:
+    #   1. Delete stale slam_toolbox posegraph so mapping starts fresh.
+    #   2. Reset the robot's wheel-odometry accumulation so the controller
+    #      and EKF agree on (0,0,0) as the starting odom position.
+    #   3. Explicitly set the EKF's internal state to the map/odom origin
+    #      so odom→base_link is identity regardless of any residual data.
     # ------------------------------------------------------------
     nodes.append(
         ExecuteProcess(
-            cmd=["bash", "-c", "rm -f ~/.ros/*.posegraph ~/.ros/*.data /tmp/*.posegraph /tmp/*.data"],
+            cmd=["bash", "-c",
+                 "rm -f ~/.ros/*.posegraph ~/.ros/*.data /tmp/*.posegraph /tmp/*.data"],
             output="screen",
         )
     )
+
+    # Reset wheel odometry on the robot (silently skipped if service absent).
+    nodes.append(
+        ExecuteProcess(
+            cmd=["bash", "-c",
+                 "sleep 3 && "
+                 "ros2 service call /mecanum_drive_controller/reset_odometry "
+                 "std_srvs/srv/Empty '{}' 2>/dev/null || true"],
+            output="screen",
+        )
+    )
+
 
     # ------------------------------------------------------------
     # IMU pipeline
@@ -160,6 +181,68 @@ def generate_launch_description():
         )
     )
 
+    # ------------------------------------------------------------
+    # Nav2 — autonomous point-to-point navigation
+    # Goals can be sent via RViz "Nav2 Goal" or NavigateToPose action.
+    # SLAM toolbox provides /map and map→odom TF; EKF provides odom→base_link.
+    # ------------------------------------------------------------
+    use_nav2_arg = DeclareLaunchArgument(
+        "use_nav2",
+        default_value="True",
+        description="Launch Nav2 navigation stack.",
+    )
+    use_nav2 = LaunchConfiguration("use_nav2")
+
+    nav2_params = os.path.join(pkg, "config", "nav2_params.yaml")
+
+    nav2_nodes = []
+    for name, package, executable in [
+        ("controller_server", "nav2_controller", "controller_server"),
+        ("planner_server",    "nav2_planner",    "planner_server"),
+        ("behavior_server",   "nav2_behaviors",  "behavior_server"),
+        ("bt_navigator",      "nav2_bt_navigator", "bt_navigator"),
+    ]:
+        nav2_nodes.append(
+            Node(
+                package=package,
+                executable=executable,
+                name=name,
+                output="screen",
+                parameters=[nav2_params, {"use_sim_time": use_sim_time}],
+                condition=IfCondition(use_nav2),
+            )
+        )
+
+    nav2_nodes.append(
+        Node(
+            package="nav2_lifecycle_manager",
+            executable="lifecycle_manager",
+            name="lifecycle_manager_navigation",
+            output="screen",
+            parameters=[
+                {"use_sim_time": use_sim_time},
+                {"autostart": True},
+                {"bond_timeout": 30.0},
+                {"node_names": [
+                    "controller_server",
+                    "planner_server",
+                    "behavior_server",
+                    "bt_navigator",
+                ]},
+            ],
+            condition=IfCondition(use_nav2),
+        )
+    )
+
+    # Delay Nav2 startup so the EKF fills the TF buffer with fresh odom→base_link
+    # transforms before Nav2 starts looking up sensor origins. Without this delay,
+    # stale TF entries from the previous server session cause the costmap to report
+    # the sensor (LIDAR) as being dozens of meters outside costmap bounds.
+    # 45 s delay so mecanum_drive_controller (spawned at 30 s on the bot) has
+    # time to activate and feed real odometry to the EKF before Nav2 starts
+    # querying the costmap sensor origins.
+    nodes.append(TimerAction(period=45.0, actions=nav2_nodes))
+
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -168,6 +251,7 @@ def generate_launch_description():
                 description="Logging level for SLAM Toolbox",
             ),
             use_sim_time_arg,
+            use_nav2_arg,
             *nodes,
         ]
     )
