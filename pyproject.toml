@@ -18,11 +18,15 @@ dependencies = [
 # from `source /opt/ros/humble/setup.bash`, whose PYTHONPATH the venv honours (env/pj-ubuntu.env).
 
 [project.optional-dependencies]
-# Object and person detection on pj-ubuntu's GPU. Linux x86 wheels carry CUDA 12.
+# Object and person detection on pj-ubuntu's GPU (RTX 4070 SUPER, driver 575 = CUDA 12.9: PyPI's
+# torch is built for CUDA 13 and refuses that driver, so Linux takes the cu126 build; see
+# [tool.uv.sources]). YOLO-World's set_classes needs Ultralytics' CLIP fork, declared here so
+# `uv sync` keeps it.
 detector = [
     "ultralytics>=8.3",
     "torch>=2.4",
     "torchvision",
+    "clip @ git+https://github.com/ultralytics/CLIP.git",
 ]
 dev = [
     "pytest>=8",
@@ -45,6 +49,15 @@ where = ["python"]
 
 [tool.setuptools.package-data]
 gpt_pet_mcp = ["vocabulary.json"]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
 
 [tool.pytest.ini_options]
 testpaths = ["regression"]
