@@ -9,11 +9,18 @@ Restart gpt-pet-mcp on pj-ubuntu (reached with `ssh pj-ubuntu.local`, key auth).
    `cd ~/gpt-pet-mcp && git pull && uv sync --extra dev` (`--extra detector` when the detector is
    wanted). Without a push, `rsync -a --exclude .venv --exclude .git ./ pj-ubuntu.local:gpt-pet-mcp/`.
 
-2. **Find the running server:** `ssh pj-ubuntu.local 'ss -ltnp | grep ":8000 "'` gives the PID
-   (`pgrep -f "gpt_pet_mcp|gpt-pet-mcp"` as a fallback).
+2. **Find the running server:** `ssh pj-ubuntu.local 'ss -ltnp | grep ":8000 "'` gives the PID.
+   With `pgrep -f`, build the pattern at runtime (`pat="g""pt-pet-mcp --http"; pgrep -f "$pat"`):
+   a literal `gpt-pet-mcp --http` anywhere in the same remote command line (the relaunch string
+   below, for one) makes `pgrep -f` match the remote shell itself, and `kill` then ends the ssh
+   session with exit 255 and no output.
 
-3. **Stop it:** `kill <PID>`, wait 2 s; `kill -9` only if it still listens. Its shutdown sends zero
-   twists and cancels any Nav2 goal.
+3. **Stop it** in a remote command of its own (never in the one that relaunches): `kill <PID>`,
+   wait 2 s; `kill -9` only if it still listens. Its shutdown sends zero twists and cancels any
+   Nav2 goal. pj-ubuntu's sshd drops a second connection opened within seconds of another, so
+   reuse one multiplexed connection (`ssh -o ControlMaster=auto -o ControlPath=~/.ssh/cm-%r@%h-%p
+   -o ControlPersist=1800 ...`) for the whole sequence, and start background work there with
+   `setsid nohup ... < /dev/null & disown`.
 
 4. **Relaunch** in the tmux session that holds the ROS 2 server launch, window `mcp`
    (`tmux new-window -t server -n mcp` if it does not exist):
