@@ -27,6 +27,7 @@ class Detection:
     label: str  # AI2-THOR style object type ("Sofa", "Person")
     conf: float
     bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2 in frame pixels
+    depth_m: Optional[float] = None  # a better depth than the box's centre (a person's hips and shoulders)
 
 
 @dataclass
@@ -102,7 +103,7 @@ class ObjectTracker:
         seen: List[Track] = []
         with self._lock:
             for det in detections:
-                depth = box_depth_m(depth_m, det.bbox)
+                depth = det.depth_m if det.depth_m is not None else box_depth_m(depth_m, det.bbox)
                 if depth is None:
                     continue
                 u = (det.bbox[0] + det.bbox[2]) / 2.0

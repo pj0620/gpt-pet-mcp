@@ -17,7 +17,8 @@ pytestmark = [pytest.mark.parity, pytest.mark.timeout(300)]
 async def test_robot_exposes_exactly_the_contract(sim_url, robot_url):
     sim_tools = await list_tools(sim_url)
     robot_tools = await list_tools(robot_url)
-    assert set(robot_tools) == set(contract.served_tools())
+    # the base tools, or the whole contract once the server runs with GPTPET_MCP_ATTENTION=1
+    assert set(robot_tools) in (set(contract.BASE_TOOLS), set(contract.ROBOT_CONTRACT_TOOLS)), sorted(robot_tools)
     assert set(robot_tools) <= set(sim_tools), f"not in the simulator: {set(robot_tools) - set(sim_tools)}"
     assert not any(name.startswith("sim_") for name in robot_tools)
 

@@ -16,12 +16,12 @@ import numpy as np
 from loguru import logger
 from PIL import Image as PILImage
 
-from gpt_pet_mcp import config
+from gpt_pet_mcp import config, contract
 from gpt_pet_mcp.annotate import annotate_view
-from gpt_pet_mcp.attention import AttentionError, NullAttention
+from gpt_pet_mcp.attention import AttentionError, NullAttention, RobotAttentionManager
 from gpt_pet_mcp.camera import CameraError, CameraFeed, KinectTilt, TiltError
 from gpt_pet_mcp.describe import DestinationRegistry, describe_object, describe_passage
-from gpt_pet_mcp.detector import ObjectDetector
+from gpt_pet_mcp.detector import ObjectDetector, PersonDetector, load_vocabulary
 from gpt_pet_mcp.errors import RobotError
 from gpt_pet_mcp.frames import dist_xz
 from gpt_pet_mcp.maprender import MapOverlays
@@ -47,8 +47,14 @@ class Robot:
         self.moves = Moves(self.bridge)
         self.registry = DestinationRegistry()
         self.objects = ObjectTracker()
-        self.detector = ObjectDetector()
-        self.attention = NullAttention(self.tilt.tilt_deg)
+        # with the attention tools served, people come from the pose detector (keypoints: depth at
+        # the torso, posture later), so the object detector's vocabulary drops its person prompt
+        self.people = PersonDetector() if contract.ATTENTION_ENABLED else PersonDetector(model_name="none")
+        vocabulary = load_vocabulary(config.VOCABULARY_PATH)
+        if self.people.enabled:
+            vocabulary = {prompt: label for prompt, label in vocabulary.items() if label != config.PERSON_LABEL}
+        self.detector = ObjectDetector(vocabulary=vocabulary)
+        self.attention = RobotAttentionManager(self) if contract.ATTENTION_ENABLED else NullAttention(self.tilt.tilt_deg)
         self._started = False
         self._stopping = False
         self._health_thread: Optional[threading.Thread] = None
@@ -64,6 +70,7 @@ class Robot:
         self.nav.set_blocker_source(lambda: self.objects.blocker_name(self.bridge.pose(), 0.0))
         self.moves.set_blocker_source(lambda bearing: self.objects.blocker_name(self.bridge.pose(), bearing))
         self.detector.load_in_background()
+        self.people.load_in_background()
         self._started = True
         self._health_thread = threading.Thread(target=self._health_loop, name="health", daemon=True)
         self._health_thread.start()
@@ -95,6 +102,8 @@ class Robot:
         health["camera"] = self.camera.health()
         health["tilt"] = {"node": self.tilt.ready(), "commanded_deg": self.tilt.tilt_deg(), "measured_deg": self.tilt.measured()}
         health["detector"] = self.detector.health()
+        health["people"] = self.people.health()
+        health["attention"] = contract.ATTENTION_ENABLED
         health["nav_state"] = self.nav.status()["state"]
         return health
 
@@ -109,6 +118,7 @@ class Robot:
             and camera["depth_age_s"] is not None
             and health["tilt"]["node"]
             and (not self.detector.enabled or self.detector.loaded)
+            and (not self.people.enabled or self.people.loaded)
         )
 
     def _health_loop(self) -> None:
@@ -118,12 +128,14 @@ class Robot:
                 health = self.health()
                 green = self._all_green(health)
                 if green != last_green or not green:
-                    compact = {k: v for k, v in health.items() if k not in ("camera", "detector", "tilt")}
+                    compact = {k: v for k, v in health.items() if k not in ("camera", "detector", "people", "tilt")}
                     compact["camera"] = {k: health["camera"][k] for k in ("rgb_age_s", "depth_age_s", "intrinsics")}
                     compact["tilt_node"] = health["tilt"]["node"]
                     compact["detector"] = health["detector"]["loaded"] if self.detector.enabled else "off"
-                    if health["detector"]["error"]:
-                        compact["detector_error"] = health["detector"]["error"]
+                    compact["people"] = health["people"]["loaded"] if self.people.enabled else "off"
+                    for key in ("detector", "people"):
+                        if health[key]["error"]:
+                            compact[f"{key}_error"] = health[key]["error"]
                     logger.info("Health {}: {}", "ok" if green else "degraded", compact)
                 last_green = green
             except Exception:  # noqa: BLE001
@@ -162,6 +174,8 @@ class Robot:
         now = time.monotonic()
 
         detections = self.detector.detect(frame.rgb) if self.detector.enabled else []
+        if self.people.enabled:
+            detections = detections + self.people.detect(frame.rgb, frame.depth_m)
         tracks = self.objects.update(detections, frame.depth_m, frame.intr, pose, camera_pos, horizon)
         object_records = []
         for track in tracks:

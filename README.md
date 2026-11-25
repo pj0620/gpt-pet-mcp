@@ -23,7 +23,7 @@ the other.
 | `do_move(action, moveMagnitude)` | Ahead/back through Nav2's `drive_on_heading`/`backup` behaviours (odometry-closed, collision-checked); left/right by streaming `/cmd_vel` (the mecanum base strafes) with a lidar guard; the simulator's texts, including partial progress. |
 | `do_rotate(action, degrees)` | Nav2's `spin` behaviour. |
 | `do_look(direction)` | The Kinect's tilt motor through the driver node's `tilt_deg` parameter: 27° up or level. |
-| `set_attention` / `cancel_attention` / `get_attention_status` | Phase 4 (person detector + follower). Not served until then (`contract.ATTENTION_ENABLED`). |
+| `set_attention` / `cancel_attention` / `get_attention_status` | The simulator's attention behaviour on the robot: a YOLO-pose person detector on the Kinect frames (depth read at the torso), aiming with `/cmd_vel`, Kinect tilt hysteresis, approach through Nav2, back-ups through `backup`; same states, fields and reasons. Served only when the server runs with `GPTPET_MCP_ATTENTION=1` (off until verified on the robot; the brain's `[features] attention` follows). |
 
 Resource `view://rgb`: the last RGB frame as PNG.
 
@@ -70,7 +70,8 @@ green, then on change.
 | `GPTPET_MCP_RGB_TOPIC`, `GPTPET_MCP_DEPTH_TOPIC`, `GPTPET_MCP_CAMERA_INFO_TOPIC` | `/kinect/image_raw`, `/kinect/depth/image_raw`, `/kinect/camera_info` | Kinect topics |
 | `GPTPET_MCP_KINECT_NODE` | `/kinect/kinect_ros2` | the node whose `tilt_deg` parameter is the tilt motor |
 | `GPTPET_MCP_DETECTOR` | `yolov8s-worldv2.pt` | YOLO-World weights; `none` = passages only |
-| `GPTPET_MCP_POSE_MODEL` | `yolov8n-pose.pt` | person detector (Phase 4) |
+| `GPTPET_MCP_ATTENTION` | 0 | `1` serves the three attention tools (and runs the person detector) |
+| `GPTPET_MCP_POSE_MODEL` | `yolov8n-pose.pt` | person detector weights (with attention on, people come from it and the object detector drops its person prompt) |
 | `GPTPET_MCP_VOCABULARY` | packaged `vocabulary.json` | detector prompt → AI2-THOR label |
 | `GPTPET_MCP_DETECTOR_CONF`, `GPTPET_MCP_DETECTOR_DEVICE` | 0.3, `cuda:0` | |
 | `GPTPET_MCP_MAX_SPEED_MPS` | 0.1 | what the robot drives at (Nav2 MPPI `vx_max`) |

@@ -9,6 +9,7 @@ compares exactly what is served.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Optional
 
 from gpt_pet_mcp import config
@@ -28,8 +29,9 @@ ATTENTION_TOOLS = ("set_attention", "cancel_attention", "get_attention_status")
 ROBOT_CONTRACT_TOOLS = BASE_TOOLS + ATTENTION_TOOLS
 RESOURCES = ("view://rgb",)
 
-ATTENTION_ENABLED = False
-"""Phase 4 flips this: the person detector and the attention behaviour are built."""
+ATTENTION_ENABLED = os.environ.get("GPTPET_MCP_ATTENTION", "0").lower() in ("1", "true", "yes")
+"""GPTPET_MCP_ATTENTION=1 serves the attention tools (the person detector and the attention
+behaviour, Phase 4). Off until verified on the robot; the brain's `[features] attention` follows."""
 
 
 def served_tools() -> tuple:
