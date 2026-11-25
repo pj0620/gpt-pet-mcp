@@ -85,7 +85,7 @@ class ActionCall:
     def __init__(self, client: ActionClient, goal: Any, name: str = "") -> None:
         self._client = client
         self._goal = goal
-        self.name = name or client._action_name  # noqa: SLF001 - rclpy keeps the name private
+        self.name = name or str(getattr(client, "_action_name", "action"))
         self._accepted = threading.Event()
         self._done = threading.Event()
         self._lock = threading.Lock()

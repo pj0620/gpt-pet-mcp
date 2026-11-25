@@ -81,6 +81,7 @@ class NavGoal:
     kind: str  # object | passage | person
     target: Dict[str, float]  # where the destination is (contract frame)
     goal_xz: Tuple[float, float]  # where the robot drives to
+    goal_yaw_deg: float  # which way it faces there (contract yaw)
     speed: float
     corners: List[Dict[str, float]] = field(default_factory=list)
     cum_from: List[float] = field(default_factory=list)
@@ -134,9 +135,8 @@ class RobotNavManager:
 
         effective = min(speed, config.ROBOT_MAX_SPEED_MPS)
         bridge.publish_speed_limit(effective)
-        pose_msg = self._pose_stamped(goal.goal_xz, heading_toward(goal.goal_xz, (target["x"], target["z"])) if kind != "passage" else None, goal)
         nav_goal = NavigateToPose.Goal()
-        nav_goal.pose = pose_msg
+        nav_goal.pose = self._pose_stamped(goal.goal_xz, goal.goal_yaw_deg)
         call = bridge.call(bridge.navigate, nav_goal, config.NAVIGATE_ACTION)
         if not call.wait_accepted(config.ACTION_ACCEPT_TIMEOUT_S) or not call.accepted:
             reason = "Nav2 rejected the goal (is the navigation stack active?)"
@@ -255,18 +255,14 @@ class RobotNavManager:
 
     # --- planning ---
 
-    def _pose_stamped(self, xz: Tuple[float, float], yaw_deg: Optional[float], goal: Optional[NavGoal] = None) -> PoseStamped:
+    def _pose_stamped(self, xz: Tuple[float, float], yaw_deg: float) -> PoseStamped:
         msg = PoseStamped()
         msg.header.frame_id = config.MAP_FRAME
         # stamp 0 = the latest transform, as bin/send_goal.py and bin/nav/nav_goal.py do
         x, y = to_ros_xy(*xz)
         msg.pose.position.x = float(x)
         msg.pose.position.y = float(y)
-        if yaw_deg is None and goal is not None and len(goal.corners) >= 2:
-            # a passage: face the way the path arrives
-            a, b = goal.corners[-2], goal.corners[-1]
-            yaw_deg = heading_toward((a["x"], a["z"]), (b["x"], b["z"]))
-        theta = yaw_to_ros(yaw_deg if yaw_deg is not None else 0.0)
+        theta = yaw_to_ros(yaw_deg)
         qx, qy, qz, qw = quaternion_from_yaw(theta)
         msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w = qx, qy, qz, qw
         return msg
@@ -293,7 +289,10 @@ class RobotNavManager:
             raise NavError(f"Nav2 is not running (/{config.COMPUTE_PATH_ACTION} unavailable)")
         target_xz = (float(target["x"]), float(target["z"]))
         goal_xz = self._standoff(target_xz, robot, kind)
+        # objects and people: arrive facing them; passages: face the way in (from where the robot is)
         yaw = heading_toward(goal_xz, target_xz) if kind != "passage" else heading_toward(robot.xz, goal_xz)
+        if dist_xz(goal_xz, target_xz if kind != "passage" else robot.xz) < 1e-6:
+            yaw = robot.yaw_deg
 
         request = ComputePathToPose.Goal()
         request.goal = self._pose_stamped(goal_xz, yaw)
@@ -326,6 +325,7 @@ class RobotNavManager:
             kind=kind,
             target=dict(target),
             goal_xz=goal_xz,
+            goal_yaw_deg=yaw,
             speed=min(speed, config.ROBOT_MAX_SPEED_MPS),
             corners=corners,
             cum_from=cum_from,

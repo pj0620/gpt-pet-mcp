@@ -96,7 +96,7 @@ def decode_depth_m(msg: Any) -> np.ndarray:
         if "compresseddepth" in fmt:
             if len(raw) <= COMPRESSED_DEPTH_HEADER_BYTES:
                 raise CameraError("empty compressedDepth message")
-            header = struct.unpack("<ifff", raw[:COMPRESSED_DEPTH_HEADER_BYTES] + b"\0\0\0\0")[:3]
+            header = struct.unpack("<iff", raw[:COMPRESSED_DEPTH_HEADER_BYTES])  # format, depthQuantA, depthQuantB
             payload = raw[COMPRESSED_DEPTH_HEADER_BYTES:]
             image = PILImage.open(io.BytesIO(payload))
             array = np.asarray(image)
