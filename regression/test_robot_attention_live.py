@@ -22,6 +22,7 @@ from regression.support import call, call_error, tool_json
 pytestmark = [pytest.mark.robot, pytest.mark.timeout(1800)]
 
 PERSON_WAIT_S = float(os.environ.get("GPTPET_MCP_PERSON_WAIT_S", "30"))
+LEAVE_WAIT_S = float(os.environ.get("GPTPET_MCP_LEAVE_WAIT_S", "40"))  # for the person to walk away and be lost
 
 
 async def _person_id(robot_url: str) -> str:
@@ -71,7 +72,7 @@ async def test_frames_a_still_person_then_loses_them(robot_url):
     view = tool_json(await call(robot_url, "get_current_view"))
     assert view["attention"]["state"] in ("framed", "aiming") and view["attention"]["target"] == person
     print("FRAMED: the person now walks out of view and stays away")
-    deadline = time.monotonic() + 40.0
+    deadline = time.monotonic() + LEAVE_WAIT_S
     states = []
     while time.monotonic() < deadline:
         status = tool_json(await call(robot_url, "get_attention_status"))
