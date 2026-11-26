@@ -42,8 +42,10 @@ async def test_rotate_left_turns_the_robot(robot_url):
     assert text.startswith("Successfully rotated"), text
     await asyncio.sleep(1.0)
     after = await _agent(robot_url)
-    # the contract's yaw grows clockwise: a left turn lowers it
-    assert _yaw_delta(before["yaw"], after["yaw"]) == pytest.approx(-30.0, abs=8.0)
+    # the contract's yaw grows clockwise: a left turn lowers it. Nav2's spin stops on wheel
+    # odometry; the map yaw (SLAM) reads 6-10 degrees more on this robot (measured 2026-11-26:
+    # 30 -> 36, 90 -> 99.5, both ways), so the check is direction plus rough magnitude
+    assert _yaw_delta(before["yaw"], after["yaw"]) == pytest.approx(-30.0, abs=12.0)
 
 
 async def test_move_ahead_and_back(robot_url):

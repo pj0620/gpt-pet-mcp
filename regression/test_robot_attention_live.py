@@ -2,7 +2,8 @@
 GPTPET_MCP_ATTENTION=1 (the pose detector loaded) and the robot on clear floor.
 
 Script for the person: stand about 2 m from the robot, ahead and a little to its left, and stay
-still until the test says "framed"; then walk out of the camera's view and stay away.
+still until the test prints "FRAMED"; then walk out of the camera's view and stay away. The tests
+wait up to GPTPET_MCP_PERSON_WAIT_S (default 30) for someone to appear in the views.
 
     GPTPET_MCP_ROBOT_OK=1 pytest regression/test_robot_attention_live.py -m robot
 """
@@ -10,6 +11,7 @@ still until the test says "framed"; then walk out of the camera's view and stay 
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 
 import pytest
@@ -17,18 +19,20 @@ import pytest
 from gpt_pet_mcp import contract
 from regression.support import call, call_error, tool_json
 
-pytestmark = [pytest.mark.robot, pytest.mark.timeout(600)]
+pytestmark = [pytest.mark.robot, pytest.mark.timeout(1800)]
+
+PERSON_WAIT_S = float(os.environ.get("GPTPET_MCP_PERSON_WAIT_S", "30"))
 
 
 async def _person_id(robot_url: str) -> str:
-    deadline = time.monotonic() + 30.0
+    deadline = time.monotonic() + PERSON_WAIT_S
     while time.monotonic() < deadline:
         view = tool_json(await call(robot_url, "get_current_view"))
         people = [d for d in view["destinations"] if d["label"] == "Person"]
         if people:
             return min(people, key=lambda d: d.get("distance_m", 9.0))["id"]
         await asyncio.sleep(1.0)
-    pytest.fail("no Person destination in 30 s of views: is someone standing in front of the robot?")
+    pytest.fail(f"no Person destination in {PERSON_WAIT_S:g} s of views: is someone standing in front of the robot?")
 
 
 async def test_attention_tools_are_served(robot_url):
