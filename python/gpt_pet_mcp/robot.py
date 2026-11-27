@@ -70,6 +70,7 @@ class Robot:
         self.nav.set_blocker_source(lambda: self.objects.blocker_name(self.bridge.pose(), 0.0))
         self.moves.set_blocker_source(lambda bearing: self.objects.blocker_name(self.bridge.pose(), bearing))
         self.moves.set_lane_source(self.obstacle_ahead_m)
+        self.nav.set_lane_source(self.obstacle_ahead_m)
         self.detector.load_in_background()
         self.people.load_in_background()
         self._started = True
@@ -184,6 +185,8 @@ class Robot:
         x = d * (us - intr.cx) / intr.fx  # right of the camera
         height = config.CAMERA_HEIGHT_M - d * (vs - intr.cy) / intr.fy  # above the floor, camera level
         lane = (np.abs(x) < config.LANE_HALF_WIDTH_M) & (height > config.LANE_MIN_HEIGHT_M) & (height < config.LANE_MAX_HEIGHT_M)
+        if int((lane & (d <= config.LANE_SATURATION_M)).sum()) >= config.LANE_SATURATED_POINTS:
+            return 0.0  # the Kinect's minimum-range value: something is closer than it can measure
         if int(lane.sum()) < config.LANE_MIN_POINTS:
             return None
         z = np.sort(d[lane])

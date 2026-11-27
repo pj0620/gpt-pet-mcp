@@ -79,17 +79,29 @@ TF_TIMEOUT_S = 0.3
 ROBOT_MAX_SPEED_MPS = _env_float("GPTPET_MCP_MAX_SPEED_MPS", 0.1)
 """What the robot drives at: Nav2's MPPI vx_max (nav2_params.yaml). set_nav_goal's speed_mps is
 clamped to the contract's range but a drive never goes faster than this."""
-BUMPER_FORWARD_M = 0.20  # the front bumper ahead of base_link (nav2's robot_radius)
+BUMPER_FORWARD_M = 0.105  # the body's front face ahead of base_link (URDF body_width 0.21); the Kinect's face is at 0.111
 LANE_HALF_WIDTH_M = 0.25
 LANE_LOOK_M = 1.5  # how far ahead the Kinect lane check looks
 LANE_MIN_HEIGHT_M = 0.06  # above the floor: below this is floor noise (the camera sits 0.3 m up, level)
 LANE_MAX_HEIGHT_M = 0.6
 LANE_MIN_POINTS = 60  # depth samples (2x2 subsampled) an obstacle must show before it counts
-LANE_STOP_M = _env_float("GPTPET_MCP_LANE_STOP_M", 0.45)
+LANE_SATURATION_M = 0.53
+"""The Kinect returns ~0.52 m for anything closer than its minimum range instead of nothing
+(measured 2026-11-27: two frames bottomed out at 0.519 and 0.521 with a bottle against the robot).
+Lane samples at or under this read as 'in contact range'."""
+LANE_SATURATED_POINTS = 20
+LANE_CHECK_PERIOD_S = 0.3  # how often a Nav2 drive consults the Kinect lane check
+LANE_ARRIVAL_REMAINING_M = 1.0
+"""A lane stop with no more path left than this, on a drive to an object or a person, counts as
+the arrival (the camera kept the robot a standoff short of a seat or a low thing the lidar never
+mapped); earlier in the path it is a block."""
+LANE_STOP_M = _env_float("GPTPET_MCP_LANE_STOP_M", 0.6)
 """do_move MoveAhead stops when the Kinect sees something in the lane closer than this to the
 bumper. The lidar plane misses bottles, shoes and low boxes (2026-11-27: a bottle at 0.5 m was pushed
-2 m with 'Successfully moved'); the depth sees them down to its ~0.5 m minimum range, so the stop
-distance stays above that minus the camera-to-bumper offset. 0 disables the check."""
+2 m with 'Successfully moved'). The camera sits level 0.3 m up with a 43 degree vertical view, so it
+cannot see the floor closer than 0.76 m and loses a 20 cm object inside ~0.25 m, and its depth
+saturates under 0.52 m: the stop must come while the object is still in view, hence 0.6 m. 0
+disables the check."""
 SIDESTEP_MODE = _env_str("GPTPET_MCP_SIDESTEP_MODE", "turn")
 """How MoveLeft/MoveRight are done: "turn" = turn 90 degrees to that side, drive the distance, turn
 back (the mecanum wheels used like normal wheels; the user's choice 2026-11-27 after the strafes
@@ -121,7 +133,10 @@ STRAFE_SQUARE_MAX_S = 4.0
 PLAN_TIMEOUT_S = 5.0
 CANCEL_TIMEOUT_S = 3.0
 ACTION_ACCEPT_TIMEOUT_S = 5.0
-OBJECT_STANDOFF_M = 0.5  # a drive to an object ends this far from its centre, facing it
+OBJECT_STANDOFF_M = _env_float("GPTPET_MCP_OBJECT_STANDOFF_M", 0.7)
+"""A drive to an object ends this far from its detected centre, facing it. 0.5 put the robot's
+nose under a chair's seat (2026-11-27 S8: the detected centre is the seat/back, the legs and the
+seat's front edge are nearer); 0.7 plus the Kinect lane check keeps it off the furniture."""
 STANDOFF_FALLBACKS_M = (0.7, 0.9)  # tried when no free floor is near the first standoff point
 PROGRESS_SAMPLE_S = 0.1
 PROGRESS_JUMP_CAP_M = 0.3  # a pose jump larger than this per sample is SLAM correcting, not driving

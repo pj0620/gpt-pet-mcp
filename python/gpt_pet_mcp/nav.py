@@ -27,6 +27,12 @@ from geometry_msgs.msg import PoseStamped
 from loguru import logger
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
 
+
+def kind_is_arrival(kind: str) -> bool:
+    """Drives to objects and people end a standoff short of them, so the camera stopping the robot
+    near the end is the arrival; a passage is driven through, so a stop there is a block."""
+    return kind in ("object", "person")
+
 from gpt_pet_mcp import config
 from gpt_pet_mcp.attention import standoff_point
 from gpt_pet_mcp.frames import Pose2D, dist_xz, heading_toward, quaternion_from_yaw, to_ros_xy, to_sim_xz, yaw_to_ros
@@ -107,6 +113,20 @@ class RobotNavManager:
 
     def set_blocker_source(self, source) -> None:
         self._blocker_source = source
+
+    def set_lane_source(self, source) -> None:
+        """A callable -> metres to the nearest thing in the lane ahead by the Kinect (None = clear),
+        polled while a drive runs: what the lidar plane misses (seats, bottles, low boxes)."""
+        self._lane_source = source
+
+    def _lane_ahead(self) -> Optional[float]:
+        source = getattr(self, "_lane_source", None)
+        if source is None or config.LANE_STOP_M <= 0.0:
+            return None
+        try:
+            return source()
+        except Exception:  # noqa: BLE001 - a camera hiccup must not end a drive
+            return None
 
     # --- public API (the simulator's) ---
 
@@ -355,11 +375,23 @@ class RobotNavManager:
     def _run_follow(self, goal: NavGoal, call: ActionCall, cancel: threading.Event) -> None:
         bridge = self._bridge
         last = bridge.pose()
+        lane_hit: Optional[float] = None
+        lane_check_at = 0.0
         while not call.done:
             if cancel.wait(config.PROGRESS_SAMPLE_S):
                 if not call.wait(config.CANCEL_TIMEOUT_S):
                     break
                 continue
+            now = time.monotonic()
+            if now - lane_check_at >= config.LANE_CHECK_PERIOD_S:
+                lane_check_at = now
+                ahead = self._lane_ahead()
+                if ahead is not None and ahead < config.LANE_STOP_M:
+                    lane_hit = ahead
+                    logger.info("Nav goal {}: the Kinect sees something {:.2f} m ahead in the lane; stopping", goal.goal_id, ahead)
+                    call.cancel(config.CANCEL_TIMEOUT_S)
+                    bridge.stop_robot(5)
+                    break
             pose = bridge.pose()
             feedback = call.feedback
             with self._state_lock:
@@ -379,6 +411,19 @@ class RobotNavManager:
         status = call.status
         pose = bridge.pose()
         where = f" near ({pose.x:.2f}, {pose.z:.2f})" if pose is not None else ""
+        if lane_hit is not None:
+            # Close to the destination this is the arrival (the camera stops the robot a safe
+            # standoff short of a seat or a low object the lidar never saw); earlier in the path it
+            # is something in the way.
+            with self._state_lock:
+                remaining = self._remaining
+            if kind_is_arrival(goal.kind) and remaining is not None and remaining <= config.LANE_ARRIVAL_REMAINING_M:
+                self._finish("succeeded")
+            else:
+                blocker = self._blocker()
+                by = f" by {blocker}" if blocker else ""
+                self._finish("failed", f"blocked{by}{where} (seen by the camera {lane_hit:.2f} m ahead)")
+            return
         if call.error:
             self._finish("failed", f"internal error: {call.error}"[:120])
         elif status == GoalStatus.STATUS_SUCCEEDED:
