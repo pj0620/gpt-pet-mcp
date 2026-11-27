@@ -69,6 +69,7 @@ class Robot:
         self.tilt.attach(self.bridge)
         self.nav.set_blocker_source(lambda: self.objects.blocker_name(self.bridge.pose(), 0.0))
         self.moves.set_blocker_source(lambda bearing: self.objects.blocker_name(self.bridge.pose(), bearing))
+        self.moves.set_lane_source(self.obstacle_ahead_m)
         self.detector.load_in_background()
         self.people.load_in_background()
         self._started = True
@@ -161,6 +162,33 @@ class Robot:
         return cells[near]
 
     # --- get_current_view ---
+
+    def obstacle_ahead_m(self) -> Optional[float]:
+        """The nearest thing in the robot's lane by the Kinect depth, in metres from the front
+        bumper; None when there is no fresh frame or the lane is clear within LANE_LOOK_M. This is
+        what catches bottles, shoes and low boxes that the lidar plane never puts in the costmap."""
+        import numpy as np
+
+        try:
+            frame = self.camera.latest_pair()
+        except Exception:  # noqa: BLE001 - no frame, no opinion
+            return None
+        depth, intr = frame.depth_m, frame.intr
+        h, w = depth.shape
+        vs, us = np.mgrid[0:h:2, 0:w:2]
+        d = depth[vs, us]
+        ok = np.isfinite(d) & (d > 0.2) & (d < config.LANE_LOOK_M)
+        if not ok.any():
+            return None
+        d, us, vs = d[ok], us[ok], vs[ok]
+        x = d * (us - intr.cx) / intr.fx  # right of the camera
+        height = config.CAMERA_HEIGHT_M - d * (vs - intr.cy) / intr.fy  # above the floor, camera level
+        lane = (np.abs(x) < config.LANE_HALF_WIDTH_M) & (height > config.LANE_MIN_HEIGHT_M) & (height < config.LANE_MAX_HEIGHT_M)
+        if int(lane.sum()) < config.LANE_MIN_POINTS:
+            return None
+        z = np.sort(d[lane])
+        nearest = float(z[config.LANE_MIN_POINTS - 1])  # the N-th nearest sample: specks do not count
+        return max(0.0, nearest - (config.BUMPER_FORWARD_M - config.CAMERA_FORWARD_M))
 
     def current_view(self) -> Tuple[PILImage.Image, Dict[str, Any]]:
         try:

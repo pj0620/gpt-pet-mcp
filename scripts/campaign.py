@@ -440,6 +440,8 @@ async def s6(args) -> None:
         st.cue("1.5 m clear ahead and 0.7 m each side; six short moves, a marker and a measurement for each")
         rows = []
         for i, (action, mag) in enumerate(seq):
+            if i + 1 < args.start:
+                continue
             st.marker()
             if not await st.wait_go(f"marker down for {action} {mag:g}"):
                 return
@@ -748,7 +750,7 @@ def main() -> None:
     p = sub.add_parser("s3"); p.add_argument("--wall", choices=("left", "right"), default="left"); p.set_defaults(fn=s3)
     sub.add_parser("s4").set_defaults(fn=s4)
     sub.add_parser("s5").set_defaults(fn=s5)
-    sub.add_parser("s6").set_defaults(fn=s6)
+    p = sub.add_parser("s6"); p.add_argument("--from", dest="start", type=int, default=1, help="start at this move (1-6) of ahead 0.5, back 0.5, right 0.3, left 0.3, ahead 1.0, back 1.0"); p.set_defaults(fn=s6)
     p = sub.add_parser("s7"); p.add_argument("--blocker", default="Box", help="label of the object placed in the way"); p.add_argument("--distance", type=float, default=0.5, help="its nearest face, m from the bumper (0.4-0.7)"); p.set_defaults(fn=s7)
     p = sub.add_parser("s8"); p.add_argument("--step", choices=("main", "speed"), default="main"); p.add_argument("--goal-a", dest="goal_a", default="Chair"); p.add_argument("--goal-b", dest="goal_b", default="Box"); p.set_defaults(fn=s8)
     p = sub.add_parser("s9"); p.add_argument("--step", choices=("a", "b", "c"), required=True); p.add_argument("--goal", default=None); p.add_argument("--obstacle", default="Box", help="label of the object put in the path (step c)"); p.set_defaults(fn=s9)

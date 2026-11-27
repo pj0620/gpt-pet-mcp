@@ -79,6 +79,17 @@ TF_TIMEOUT_S = 0.3
 ROBOT_MAX_SPEED_MPS = _env_float("GPTPET_MCP_MAX_SPEED_MPS", 0.1)
 """What the robot drives at: Nav2's MPPI vx_max (nav2_params.yaml). set_nav_goal's speed_mps is
 clamped to the contract's range but a drive never goes faster than this."""
+BUMPER_FORWARD_M = 0.20  # the front bumper ahead of base_link (nav2's robot_radius)
+LANE_HALF_WIDTH_M = 0.25
+LANE_LOOK_M = 1.5  # how far ahead the Kinect lane check looks
+LANE_MIN_HEIGHT_M = 0.06  # above the floor: below this is floor noise (the camera sits 0.3 m up, level)
+LANE_MAX_HEIGHT_M = 0.6
+LANE_MIN_POINTS = 60  # depth samples (2x2 subsampled) an obstacle must show before it counts
+LANE_STOP_M = _env_float("GPTPET_MCP_LANE_STOP_M", 0.45)
+"""do_move MoveAhead stops when the Kinect sees something in the lane closer than this to the
+bumper. The lidar plane misses bottles, shoes and low boxes (2026-11-27: a bottle at 0.5 m was pushed
+2 m with 'Successfully moved'); the depth sees them down to its ~0.5 m minimum range, so the stop
+distance stays above that minus the camera-to-bumper offset. 0 disables the check."""
 SIDESTEP_MODE = _env_str("GPTPET_MCP_SIDESTEP_MODE", "turn")
 """How MoveLeft/MoveRight are done: "turn" = turn 90 degrees to that side, drive the distance, turn
 back (the mecanum wheels used like normal wheels; the user's choice 2026-11-27 after the strafes

@@ -43,9 +43,22 @@ class Moves:
     def __init__(self, bridge: RosBridge, blocker_source: Optional[Callable[[float], Optional[str]]] = None) -> None:
         self._bridge = bridge
         self._blocker_source = blocker_source  # bearing_deg -> name of what is there, or None
+        self._lane_source: Optional[Callable[[], Optional[float]]] = None  # -> metres to the nearest thing in the lane ahead
 
     def set_blocker_source(self, source: Optional[Callable[[float], Optional[str]]]) -> None:
         self._blocker_source = source
+
+    def set_lane_source(self, source: Optional[Callable[[], Optional[float]]]) -> None:
+        self._lane_source = source
+
+    def _lane_ahead(self) -> Optional[float]:
+        if self._lane_source is None or config.LANE_STOP_M <= 0.0:
+            return None
+        try:
+            return self._lane_source()
+        except Exception as exc:  # noqa: BLE001 - the drive must not die on a camera hiccup
+            logger.warning("Lane check failed: {}", exc)
+            return None
 
     def _blocker(self, bearing_deg: float) -> str:
         if self._blocker_source is not None:
@@ -77,6 +90,11 @@ class Moves:
             name = config.BACKUP_ACTION
         if not self._bridge.ready(client):
             return f"Move blocked: the robot's drive is not available (/{name} unavailable)"
+        if action == "MoveAhead":
+            ahead = self._lane_ahead()
+            if ahead is not None and ahead < config.LANE_STOP_M:
+                logger.info("MoveAhead refused: the Kinect sees something {:.2f} m ahead in the lane", ahead)
+                return f"Move blocked by {self._blocker(0.0)}: did not move"
         speed = config.ROBOT_MAX_SPEED_MPS
         goal.target.x = magnitude
         goal.speed = float(speed)
@@ -84,12 +102,28 @@ class Moves:
         call = self._bridge.call(client, goal, name)
         if not call.wait_accepted(config.ACTION_ACCEPT_TIMEOUT_S) or not call.accepted:
             return "Move blocked: Nav2 rejected the move (is the navigation stack active?)"
-        call.wait(magnitude / speed * 1.5 + 10.0)
+        deadline = time.monotonic() + magnitude / speed * 1.5 + 10.0
+        lane_hit: Optional[float] = None
+        while not call.done and time.monotonic() < deadline:
+            if action == "MoveAhead":
+                ahead = self._lane_ahead()
+                if ahead is not None and ahead < config.LANE_STOP_M:
+                    lane_hit = ahead
+                    call.cancel(2.0)
+                    self._bridge.stop_robot(5)
+                    break
+            call.wait(0.1)
         if not call.done:
             call.cancel(2.0)
         moved = 0.0
         if call.feedback is not None:
             moved = float(call.feedback.distance_traveled)
+        if lane_hit is not None:
+            blocker = self._blocker(0.0)
+            logger.info("MoveAhead stopped by the Kinect lane check: {:.2f} m ahead after {:.2f} m ({})", lane_hit, moved, blocker)
+            if moved > 0.01:
+                return f"Moved {moved:.2f} of {magnitude:.2f} m {direction}, then blocked by {blocker}"
+            return f"Move blocked by {blocker}: did not move"
         if call.status == GoalStatus.STATUS_SUCCEEDED:
             return f"Successfully moved {magnitude:.2f} m {direction}"
         if call.error:
