@@ -1,0 +1,70 @@
+[project]
+name = "gpt-pet-mcp"
+version = "0.1.0"
+description = "MCP server that drives the real GPTPet robot (ROS 2 Nav2 + Kinect) with the ai2thor-mcp tool contract"
+readme = "README.md"
+# pj-ubuntu runs the server on the system Python 3.10 that ROS 2 Humble's rclpy is built for.
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    # The simulator (ai2thor-mcp/uv.lock) runs these exact versions. Both servers must publish
+    # byte-identical tool schemas, and FastMCP + pydantic generate them, so the pins stay.
+    "fastmcp==2.14.2",
+    "pydantic==2.12.5",
+    "loguru>=0.7.3",
+    "pillow>=11.2.1",
+    "numpy>=1.26",
+]
+# rclpy, nav2_msgs, tf2_ros, message_filters and rcl_interfaces are not pip packages: they come
+# from `source /opt/ros/humble/setup.bash`, whose PYTHONPATH the venv honours (env/pj-ubuntu.env).
+
+[project.optional-dependencies]
+# Object and person detection on pj-ubuntu's GPU (RTX 4070 SUPER, driver 575 = CUDA 12.9: PyPI's
+# torch is built for CUDA 13 and refuses that driver, so Linux takes the cu126 build; see
+# [tool.uv.sources]). YOLO-World's set_classes needs Ultralytics' CLIP fork, declared here so
+# `uv sync` keeps it.
+detector = [
+    "ultralytics>=8.3",
+    "torch>=2.4",
+    "torchvision",
+    "clip @ git+https://github.com/ultralytics/CLIP.git",
+]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.25",
+    "pytest-timeout>=2",
+]
+
+[project.scripts]
+gpt-pet-mcp = "gpt_pet_mcp.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "python"}
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.setuptools.package-data]
+gpt_pet_mcp = ["vocabulary.json"]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+
+[tool.pytest.ini_options]
+testpaths = ["regression"]
+pythonpath = ["."]  # the tests import regression.support
+asyncio_mode = "auto"
+markers = [
+    "robot: drives the real robot (gptpetclient on, floor clear; set GPTPET_MCP_ROBOT_OK=1)",
+    "server: needs pj-ubuntu's ROS 2 graph (slam_toolbox, Nav2); the robot may be off",
+    "parity: needs the simulator server and the robot server URLs (GPTPET_MCP_SIM_URL, GPTPET_MCP_ROBOT_URL)",
+]

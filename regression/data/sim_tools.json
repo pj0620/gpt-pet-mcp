@@ -1,0 +1,892 @@
+{
+  "resources": {
+    "view://rgb": {
+      "description": "Provides view from robots RGB camera",
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "mimeType": "image/png",
+      "name": "RGB View",
+      "uri": "view://rgb"
+    }
+  },
+  "tools": {
+    "cancel_attention": {
+      "description": "Stops attending to the person (the camera keeps its tilt; do_look levels it).\nReturns the final attention status.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "cancel_attention",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "cancel_nav": {
+      "description": "Cancels the active navigation goal, stopping the robot within one step.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "cancel_nav",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "do_look": {
+      "description": "Tilts the robot's camera, like the Kinect on the real robot. The camera sits about\n0.3 m above the floor: level, it sees legs, furniture bases and the floor ahead. \"up\"\ntilts it 27 degrees up to see faces, tabletops and what a person is doing; \"straight\"\nlevels it again. The tilt stays until changed, except that starting a drive levels the\ncamera. Returns the camera's new tilt, not a picture: call get_current_view to see.\n\nArgs:\n    direction (LOOK_DIRECTION): \"up\" or \"straight\"",
+      "inputSchema": {
+        "properties": {
+          "direction": {
+            "enum": [
+              "up",
+              "straight"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "direction"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "do_look",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    "do_move": {
+      "description": "Moves the agent ahead(\"MoveAhead\"), back(\"MoveBack\"), left(\"MoveLeft\"), or right(\"MoveRight\"). Returns a summary of result of moving.\n\nManual moves preempt (cancel) any active navigation goal, like nav2 teleop.\n\nExample: do_move(action=\"MoveAhead\", moveMagnitude=2) -> moves agent forward by 2 meters\n\nArgs:\n    action (MOVE_ACTION): direction to move\n    moveMagnitude (float, optional): how much to move by in meters. Defaults to 1..",
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "MoveAhead",
+              "MoveBack",
+              "MoveLeft",
+              "MoveRight"
+            ],
+            "type": "string"
+          },
+          "moveMagnitude": {
+            "default": 1.0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "do_move"
+    },
+    "do_rotate": {
+      "description": "Rotates the agent left or right. Returns a summary of the result of rotating.\n\nManual rotations preempt (cancel) any active navigation goal, like nav2 teleop.\n\nExample: do_rotate(action=\"RotateRight\", degrees=45) -> rotates agent 45 degrees to the right\n\nArgs:\n    action (ROTATE_ACTION): rotation direction/action (e.g. \"RotateLeft\" or \"RotateRight\")\n    degrees (float, optional): how many degrees to rotate. Defaults to 90..",
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "RotateRight",
+              "RotateLeft"
+            ],
+            "type": "string"
+          },
+          "degrees": {
+            "default": 90.0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "do_rotate"
+    },
+    "end_overhead_recording": {
+      "description": "Stops the active overhead recording and finalizes the video.\n\nReturns the absolute path of a browser-playable H.264 mp4 on the server's\nfilesystem plus duration and frame stats. Errors if no recording is\nactive.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "end_overhead_recording",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "get_attention_status": {
+      "description": "The attention status without a picture (see set_attention): state, target, distance_m,\nbearing_deg, seen_s, unseen_s, moving, tilt_deg, standoff_m, since_s, reason.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_attention_status",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "get_current_view": {
+      "description": "Gets the robot's current camera view, annotated with selectable destinations.\n\nReturns the RGB frame with numbered markers plus a JSON list of destinations:\nvisible objects (green boxes) and drivable passages detected from depth\n(cyan boxes: doorways, hallways, wide openings that fit the robot). Pass any\ndestination \"id\" to set_nav_goal to drive there. Marker numbers restart each\nview; ids are stable.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_current_view"
+    },
+    "get_map": {
+      "description": "Gets the top-down occupancy map the robot has built from its depth camera at camera\nheight, like a lidar SLAM map: unexplored grey, free space white, obstacles black. Overlaid:\nrobot pose (red triangle), remaining planned path (yellow), known destinations (dots), and\nthe active goal (star). Unexplored areas fill in as the robot looks around and drives.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_map"
+    },
+    "get_nav_status": {
+      "description": "Gets the state of the current/last navigation goal.\n\nstate is one of idle | planning | following | succeeded | canceled | failed;\nprogress holds distance traveled/remaining, percent, eta_s, and waypoint\ncounts while a goal exists. Poll this after set_nav_goal until a terminal\nstate (succeeded/canceled/failed).",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_nav_status",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "list_destinations": {
+      "description": "Lists every destination the robot has seen so far (across all views).\n\nIds remain valid for set_nav_goal: objects are re-resolved to their current\nposition; passages are fixed world waypoints.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "list_destinations",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "set_attention": {
+      "description": "Keeps a person in view in the background, like the robot's own reflex: it turns to\ncentre them (within 10 degrees), tilts the camera up when they are closer than 2 m and\nlevel beyond 2.5 m, drives to about 1.3 m when they stand still farther than 1.8 m away,\nand backs up when they are closer than 0.9 m. Only a person can be attended: pass the\nPerson destination id from get_current_view. Ends by itself after 5 s out of sight\n(\"lost\"), and whenever a drive (set_nav_goal) or manual control (do_move, do_rotate,\ndo_look) starts; an active drive is preempted when attention starts.\n\nReturns the attention status, also inside every get_current_view as \"attention\":\nstate (off | aiming | approaching | framed | searching | lost), distance_m, bearing_deg\n(positive = to the right), seen_s (in view for), unseen_s, moving, tilt_deg (camera),\nstandoff_m, since_s, reason (why it ended). \"framed\" means the view is centred on the\nperson with the right tilt: a good moment to call get_current_view and look.\n\nArgs:\n    destination_id (str): the person's destination id, e.g. \"obj:person_0\"\n    standoff_m (float): how close to stand, 0.7 to 2.0 m (default 1.3); it backs up when\n        they are 0.4 m closer than that\n    follow (bool): keep up with them when they walk off (approach a walking person too)\n    greet (bool): once they are framed, wiggle (turn a little left, right and back): hello",
+      "inputSchema": {
+        "properties": {
+          "destination_id": {
+            "type": "string"
+          },
+          "follow": {
+            "default": false,
+            "type": "boolean"
+          },
+          "greet": {
+            "default": false,
+            "type": "boolean"
+          },
+          "standoff_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "destination_id"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "set_attention",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "set_nav_goal": {
+      "description": "Plans a path to a destination and starts driving there in the background.\n\ndestination_id comes from get_current_view / list_destinations (e.g.\n\"obj:Fridge|-01.50|+00.00|-00.70\" or \"psg:1\"). Returns immediately with the\nplanned path and ETA; poll get_nav_status for progress. An active goal is\npreempted (canceled and replaced), like nav2.\n\nArgs:\n    destination_id (str): id of the destination to drive to\n    speed_mps (float, optional): driving speed in meters/second. Defaults to 0.35.",
+      "inputSchema": {
+        "properties": {
+          "destination_id": {
+            "type": "string"
+          },
+          "speed_mps": {
+            "default": 0.35,
+            "type": "number"
+          }
+        },
+        "required": [
+          "destination_id"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "set_nav_goal",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_camera_move": {
+      "description": "Simulator only: fly the free camera and return its new frame (JPEG) and pose.\n\nArgs:\n    forward, right, up: metres, relative to where the camera looks (forward/right stay\n        level; up is world-vertical). Height is clamped to the room.\n    yaw, pitch: degrees to turn (yaw) and tilt (pitch, positive looks down).\n    zoom: degrees of field of view to remove (positive zooms in).",
+      "inputSchema": {
+        "properties": {
+          "forward": {
+            "default": 0.0,
+            "type": "number"
+          },
+          "pitch": {
+            "default": 0.0,
+            "type": "number"
+          },
+          "right": {
+            "default": 0.0,
+            "type": "number"
+          },
+          "up": {
+            "default": 0.0,
+            "type": "number"
+          },
+          "yaw": {
+            "default": 0.0,
+            "type": "number"
+          },
+          "zoom": {
+            "default": 0.0,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_camera_move"
+    },
+    "sim_camera_reset": {
+      "description": "Simulator only: jump the free camera to a preset relative to the robot and return the\nframe (JPEG) and pose. Presets: \"chase\" (behind and above, looking at the robot), \"front\"\n(in front, looking back at it), \"top\" (straight down).",
+      "inputSchema": {
+        "properties": {
+          "mode": {
+            "default": "chase",
+            "enum": [
+              "chase",
+              "front",
+              "top"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_camera_reset"
+    },
+    "sim_camera_view": {
+      "description": "Simulator only: the free camera's current frame (JPEG) and pose.\n\nThe free camera is a user-controlled third-party camera for watching the robot from\nanywhere in the room. It is created at a chase viewpoint on first use. Not part of the\nrobot contract; robot brains must not use it.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_camera_view"
+    },
+    "sim_exploration_stats": {
+      "description": "Simulator only: how much of the scene's floor the robot has explored so far.\n\ncoverage_pct: share of the scene's reachable positions (AI2-THOR's 0.25 m navigation grid)\nthat the occupancy map has seen as free floor. visited_pct: share within 0.5 m of the path\nthe robot has travelled. known_m2 / free_m2: area the map has observed / seen free.\ntrail_m: distance travelled. For experiments; not part of the robot contract (a real robot\nhas no ground-truth floor plan), and robot brains must not use it.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_exploration_stats",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_activity": {
+      "description": "Simulator only: the person does one thing, then stands idle. kind: ignore (wander,\nkeeping away from the robot), object (go to a piece of furniture and use it for\n`seconds`: work at a table or shelf, watch the TV, sit on a sofa or chair; object_id\npicks one), walk_by (pass the robot at arm's length without looking at it), interact\n(come to the robot and try body language: style wave, beckon or crouch; if the robot\ndoes not respond within patience_s they give up and leave). sim_person_state's\n\"activity\" says what they are doing and whether they want the robot.",
+      "inputSchema": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "patience_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_activity",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_despawn": {
+      "description": "Simulator only: remove the person (a borrowed body returns to where it was).",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_despawn",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_gesture": {
+      "description": "Simulator only: the person stops and shows body language for `seconds`, facing the\nrobot unless face_robot is false. kind: wave, beckon (\"come here\"), point, clap,\ncrouch, pet (crouch and reach out), use (work with both hands), sit, stand.",
+      "inputSchema": {
+        "properties": {
+          "face_robot": {
+            "default": true,
+            "type": "boolean"
+          },
+          "kind": {
+            "default": "wave",
+            "type": "string"
+          },
+          "seconds": {
+            "default": 3.0,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_gesture",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_goto": {
+      "description": "Simulator only: walk the person to a world point along the reachable grid\n(collision-checked steps; it yields when the robot is close).",
+      "inputSchema": {
+        "properties": {
+          "speed_mps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "x": {
+            "type": "number"
+          },
+          "z": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "z"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_goto",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_goto_robot": {
+      "description": "Simulator only: walk the person toward the robot, stopping about stop_m away.",
+      "inputSchema": {
+        "properties": {
+          "stop_m": {
+            "default": 1.0,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_goto_robot",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_life": {
+      "description": "Simulator only: the person lives procedurally, one activity after another, chosen at\nrandom by weight (default ignore 0.3, object 0.3, walk_by 0.2, interact 0.2; see\nsim_person_activity). A seed makes the day repeat exactly.",
+      "inputSchema": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_life",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_move": {
+      "description": "Simulator only: one manual collision-checked step relative to the person's\nfacing (teleop; preempts any route). Negative values go back/left.",
+      "inputSchema": {
+        "properties": {
+          "forward_m": {
+            "default": 0.25,
+            "type": "number"
+          },
+          "right_m": {
+            "default": 0.0,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_move",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_script": {
+      "description": "Simulator only: a timed behaviour script for the person, e.g.\n[{\"at_s\": 60, \"action\": \"walk_past_robot\", \"args\": {\"clearance_m\": 0.8}}].\nThe clock starts when the script is set. Actions: goto, goto_robot,\nwalk_past_robot, wander, stop, set_speed, face_robot, pause, gesture\n({\"kind\", \"seconds\"}), activity ({\"kind\", \"style\", \"seconds\"}), life\n({\"enabled\", \"seed\", \"weights\"}).",
+      "inputSchema": {
+        "properties": {
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_script",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_set_speed": {
+      "description": "Simulator only: set the person's walking speed (0.1-1.5 m/s; default 0.6).",
+      "inputSchema": {
+        "properties": {
+          "speed_mps": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "speed_mps"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_set_speed",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_spawn": {
+      "description": "Simulator only: put a person into the scene; the robot then sees it as an\nordinary destination labeled \"Person\". Spawns at (x, z) snapped to the walkable\ngrid, or at the reachable spot farthest from the robot. body=\"\" uses the\nconfigured one (the humanoid asset, which needs the server started with\nAI2THOR_MCP_PERSON_PRELOAD=1, or a borrowed objectType such as \"Statue\").\nNot part of the robot contract; robot brains must not use it.",
+      "inputSchema": {
+        "properties": {
+          "body": {
+            "default": "",
+            "type": "string"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "z": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_spawn",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_state": {
+      "description": "Simulator only: the person's pose, mode (off/idle/manual/goto/wander/script),\nspeed, remaining route, blocked reason, and the robot's pose and distance \u2014\neverything a driver (human or LLM) needs in one call.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_state",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_stop": {
+      "description": "Simulator only: stop the person where it stands (clears route, wander and script).",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_stop",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_turn": {
+      "description": "Simulator only: turn the person in place (positive = clockwise).",
+      "inputSchema": {
+        "properties": {
+          "degrees": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "degrees"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_turn",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_walk_past_robot": {
+      "description": "Simulator only: walk the person past the robot \u2014 to a spot ~1.5 m beyond it,\noffset clearance_m to the side \u2014 the scripted \"someone walks by\" move.",
+      "inputSchema": {
+        "properties": {
+          "clearance_m": {
+            "default": 0.8,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_walk_past_robot",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "sim_person_wander": {
+      "description": "Simulator only: the person wanders between random reachable spots with short\ndwell pauses. A seed makes the walk reproducible across runs.",
+      "inputSchema": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "sim_person_wander",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "start_overhead_recording": {
+      "description": "Starts recording an overhead video of the robot.\n\nExactly one recording can be active at a time; starting while one is\nactive is an error. mode=\"follow\" (default) keeps a top-down camera\nhovering above the robot as it drives; mode=\"scene\" fixes an orthographic\ncamera over the whole floor plan. The video is real time (idle gaps show\nas held frames) and capped at 10 minutes. Call end_overhead_recording to\nfinalize and get the mp4 path (saved under data/recordings/ on the server\nmachine). Note: the overhead camera keeps rendering after the first\nrecording, adding a small cost to every subsequent step.\n\nArgs:\n    mode (str, optional): \"follow\" or \"scene\". Defaults to \"follow\".",
+      "inputSchema": {
+        "properties": {
+          "mode": {
+            "default": "follow",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "start_overhead_recording",
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    }
+  }
+}

@@ -1,89 +1,40 @@
-This repo contains two ROS2 Humble workspaces: one for the server and one for the robot.
+# gpt-pet-mcp: working notes
 
-**Both workspaces must be running simultaneously.** Use Foxglove to debug the robot.
+This repo is the MCP server for the **real** GPTPet robot. It reproduces ai2thor-mcp's robot
+contract (12 tools + `view://rgb`) over ROS 2; the ROS 2 workspaces themselves live in
+`gpt-pet-v2/ros2_ws` and run on pj-ubuntu (server) and the Jetson (robot). See README.md.
 
-## Shell Setup
+## Rules
 
-Always keep **two shells open**:
+- **Never change a contract tool's signature or docstring in one repo only.** `main.py` copies them
+  verbatim from `ai2thor-mcp/python/ai2thor_mcp/main.py`; `scripts/diff_contract.py` and
+  `regression/test_contract_offline.py` fail otherwise. A contract change starts in ai2thor-mcp, then
+  the snapshot (`scripts/snapshot_sim_tools.py`) and this server follow.
+- `fastmcp==2.14.2` and `pydantic==2.12.5` stay pinned to the simulator's versions: they generate
+  the tool schemas both servers must publish identically.
+- No mocks or fakes in tests. Offline tests cover geometry and the copied modules; everything else
+  runs against the real simulator (`parity`), the real server (`server`) and the real robot (`robot`).
+- Tool bodies live in `robot.py`; `main.py` stays thin and importable without rclpy (the robot is
+  created lazily), so schemas can be listed anywhere.
+- Lock rule (the simulator's): a manager's lock guards its own fields and is never held across a
+  ROS call. Subscription callbacks only store messages; decoding happens in tool threads.
 
-| Shell | Location | How to open |
-|-------|----------|-------------|
-| **Server shell** | This machine (VS Code terminal) | Already open |
-| **Robot shell** | Jetson Nano on the robot | `./bin/ssh/gptpetclient.sh` (user: `gptpetclient`, password: `gptpetclient`) |
+## Where things run
 
-## Launching the Full System
+- pj-ubuntu (`ssh pj-ubuntu.local`): ROS 2 Humble, system Python 3.10 with rclpy, `uv` in
+  `~/.local/bin`, the clone at `~/gpt-pet-mcp`; `source /opt/ros/humble/setup.bash && source
+  env/pj-ubuntu.env` before `uv run`. The server launch runs in tmux session `server`; this server
+  belongs in a window `mcp` of the same session.
+- The Mac: offline tests and the parity test (simulator on 127.0.0.1:8765, see gpt-pet-v2's notes).
+- The robot (gptpetclient.local) must be on for `robot` tests; the Kinect node and its tilt
+  parameter come from the kinect_ros2 fork (gpt-pet-v2 submodule).
 
-### 1. Start server nodes (server shell)
-
-```bash
-cd ~/gpt-pet-v2/ros2_ws/src/server_ws
-colcon build
-. ./install/setup.bash
-ros2 launch startup server.launch.py
-```
-
-### 2. Start robot nodes (robot shell)
-
-```bash
-# SSH into the robot first
-./bin/ssh/gptpetclient.sh
-
-# Then on the robot:
-cd ~/gpt-pet-v2/ros2_ws/src/bot_ws
-colcon build
-. ./install/setup.bash
-ros2 launch startup client.launch.py
-```
-
-Both launches must be running before using Foxglove to debug.
-
-## Server Workspace
-
-**Location:** `ros2_ws/src/server_ws`
-
-Runs on the server. Handles compute-intensive tasks (SLAM, etc.). Launch files are in `ros2_ws/src/server_ws/src/startup/launch`.
-
-### Making changes
-
-Run these commands in the **server shell**:
+## Commands
 
 ```bash
-cd ~/gpt-pet-v2/ros2_ws/src/server_ws
-# 1. Edit files
-colcon build
-. ./install/setup.bash
-ros2 launch startup server.launch.py
+uv run --extra dev pytest regression -m "not robot and not server and not parity"
+python scripts/diff_contract.py
+GPTPET_MCP_ROBOT_URL=http://pj-ubuntu.local:8000/mcp uv run --extra dev pytest regression -m server
+GPTPET_MCP_SIM_URL=http://127.0.0.1:8765/mcp GPTPET_MCP_ROBOT_URL=http://pj-ubuntu.local:8000/mcp uv run --extra dev pytest regression -m parity
+GPTPET_MCP_ROBOT_OK=1 uv run --extra dev pytest regression -m robot
 ```
-
-## Bot Workspace
-
-**Location:** `ros2_ws/src/bot_ws`
-
-Runs on the Jetson Nano. Only handles tasks that must run on the robot (motor control, sensor publishing, etc.). Main launch file: `ros2_ws/src/bot_ws/src/startup/launch/client.launch.py`.
-
-### Making changes
-
-Changes are deployed to the robot via **git** — edit locally, commit and push, then pull on the robot.
-
-**Server shell** (commit and push):
-```bash
-# 1. Edit files in ros2_ws/src/bot_ws
-git add --all && git commit -m "<message>" && git push
-```
-
-**Robot shell** (pull, build, and launch):
-```bash
-cd ~/gpt-pet-v2/ros2_ws/src/bot_ws
-git pull
-colcon build && . ./install/setup.bash
-ros2 launch startup client.launch.py
-```
-
-## About the Robot
-
-- Xbox 360 Kinect camera
-- ICM20948 IMU
-- 4 motors with encoders
-- RPiLIDAR
-
-Full URDF: `ros2_ws/src/bot_ws/src/startup/urdf/gptpet.xacro`
