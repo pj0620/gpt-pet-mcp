@@ -70,7 +70,7 @@ class Robot:
         self.nav.set_blocker_source(lambda: self.objects.blocker_name(self.bridge.pose(), 0.0))
         self.moves.set_blocker_source(lambda bearing: self.objects.blocker_name(self.bridge.pose(), bearing))
         self.moves.set_lane_source(self.obstacle_ahead_m)
-        self.nav.set_lane_source(self.obstacle_ahead_m)
+        self.nav.set_lane_source(lambda: self.obstacle_ahead_m(config.NAV_LANE_HALF_WIDTH_M))
         self.detector.load_in_background()
         self.people.load_in_background()
         self._started = True
@@ -164,11 +164,14 @@ class Robot:
 
     # --- get_current_view ---
 
-    def obstacle_ahead_m(self) -> Optional[float]:
+    def obstacle_ahead_m(self, half_width_m: Optional[float] = None) -> Optional[float]:
         """The nearest thing in the robot's lane by the Kinect depth, in metres from the front
         bumper; None when there is no fresh frame or the lane is clear within LANE_LOOK_M. This is
-        what catches bottles, shoes and low boxes that the lidar plane never puts in the costmap."""
+        what catches bottles, shoes and low boxes that the lidar plane never puts in the costmap.
+        `half_width_m` narrows the lane (Nav2 drives watch a narrower one than blind moves)."""
         import numpy as np
+
+        half_width = config.LANE_HALF_WIDTH_M if half_width_m is None else half_width_m
 
         if not hasattr(self, "_lane_saturated_streak"):
             self._lane_saturated_streak = 0
@@ -186,7 +189,7 @@ class Robot:
         d, us, vs = d[ok], us[ok], vs[ok]
         x = d * (us - intr.cx) / intr.fx  # right of the camera
         height = config.CAMERA_HEIGHT_M - d * (vs - intr.cy) / intr.fy  # above the floor, camera level
-        lane = (np.abs(x) < config.LANE_HALF_WIDTH_M) & (height > config.LANE_MIN_HEIGHT_M) & (height < config.LANE_MAX_HEIGHT_M)
+        lane = (np.abs(x) < half_width) & (height > config.LANE_MIN_HEIGHT_M) & (height < config.LANE_MAX_HEIGHT_M)
         saturated = int((lane & (d <= config.LANE_SATURATION_M)).sum()) >= config.LANE_SATURATED_POINTS
         # the minimum-range value also shows up for a frame or two while the robot turns past
         # something close to the side, so it has to persist before it counts as contact range

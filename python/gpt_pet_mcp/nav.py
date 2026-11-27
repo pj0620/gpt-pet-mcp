@@ -417,7 +417,9 @@ class RobotNavManager:
             # is something in the way.
             with self._state_lock:
                 remaining = self._remaining
-            if kind_is_arrival(goal.kind) and remaining is not None and remaining <= config.LANE_ARRIVAL_REMAINING_M:
+            to_target = dist_xz(pose.xz, (goal.target["x"], goal.target["z"])) if pose is not None else None
+            near_target = to_target is not None and to_target <= config.LANE_ARRIVAL_TARGET_M
+            if kind_is_arrival(goal.kind) and near_target and remaining is not None and remaining <= config.LANE_ARRIVAL_REMAINING_M:
                 self._finish("succeeded")
             else:
                 blocker = self._blocker()

@@ -98,6 +98,11 @@ its controller passes furniture closer than a blind move would, so this sits at 
 saturation floor: in practice a drive stops when something sits inside ~0.5 m of the lens for two
 checks (a seat, a low box), which the costmap never saw. do_move's blind drives use LANE_STOP_M."""
 LANE_ARRIVAL_REMAINING_M = 1.0
+LANE_ARRIVAL_TARGET_M = 1.5  # ... and the destination itself within this of the robot (standoff 0.7 + stop 0.6 + slack)
+NAV_LANE_HALF_WIDTH_M = 0.15
+"""Half-width of the lane a Nav2 drive watches: narrower than a blind move's 0.25 m, so passing
+furniture close on one side in a hallway (which the controller does on purpose) does not stop
+the drive; only what is dead ahead does."""
 """A lane stop with no more path left than this, on a drive to an object or a person, counts as
 the arrival (the camera kept the robot a standoff short of a seat or a low thing the lidar never
 mapped); earlier in the path it is a block."""
