@@ -121,7 +121,7 @@ class RobotNavManager:
 
     def _lane_ahead(self) -> Optional[float]:
         source = getattr(self, "_lane_source", None)
-        if source is None or config.LANE_STOP_M <= 0.0:
+        if source is None or config.NAV_LANE_STOP_M <= 0.0:
             return None
         try:
             return source()
@@ -386,7 +386,7 @@ class RobotNavManager:
             if now - lane_check_at >= config.LANE_CHECK_PERIOD_S:
                 lane_check_at = now
                 ahead = self._lane_ahead()
-                if ahead is not None and ahead < config.LANE_STOP_M:
+                if ahead is not None and ahead < config.NAV_LANE_STOP_M:
                     lane_hit = ahead
                     logger.info("Nav goal {}: the Kinect sees something {:.2f} m ahead in the lane; stopping", goal.goal_id, ahead)
                     call.cancel(config.CANCEL_TIMEOUT_S)

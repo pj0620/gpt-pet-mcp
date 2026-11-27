@@ -92,6 +92,11 @@ Lane samples at or under this read as 'in contact range'."""
 LANE_SATURATED_POINTS = 40
 LANE_SATURATED_FRAMES = 2  # consecutive checks that must see saturation before it counts (one frame flickers while turning)
 LANE_CHECK_PERIOD_S = 0.3  # how often a Nav2 drive consults the Kinect lane check
+NAV_LANE_STOP_M = _env_float("GPTPET_MCP_NAV_LANE_STOP_M", 0.45)
+"""The lane distance that stops a Nav2 drive. Nav2 already steers round what the lidar mapped and
+its controller passes furniture closer than a blind move would, so this sits at the Kinect's
+saturation floor: in practice a drive stops when something sits inside ~0.5 m of the lens for two
+checks (a seat, a low box), which the costmap never saw. do_move's blind drives use LANE_STOP_M."""
 LANE_ARRIVAL_REMAINING_M = 1.0
 """A lane stop with no more path left than this, on a drive to an object or a person, counts as
 the arrival (the camera kept the robot a standoff short of a seat or a low thing the lidar never

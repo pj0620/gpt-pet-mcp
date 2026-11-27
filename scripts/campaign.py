@@ -506,7 +506,10 @@ async def s8(args) -> None:
         if not await st.wait_go("goal objects placed"):
             return
         chair = await st.wait_label(args.goal_a, 120.0, every_s=2.0)
-        box = next((d for d in (await st.view("find_goal_b")).get("destinations", []) if d["label"] == args.goal_b), None)
+        others = [d for d in (await st.view("find_goal_b")).get("destinations", []) if d["kind"] == "object" and d["label"] != args.goal_a]
+        box = next((d for d in others if d["label"] == args.goal_b), None) or (others[0] if others else None)
+        if box is not None and box["label"] != args.goal_b:
+            st.note(f"goal B: {args.goal_b} not in view, using {box['id']} instead")
         if not chair:
             return
         err = await st.call("set_nav_goal", {"destination_id": "obj:nope"})

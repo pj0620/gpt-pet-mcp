@@ -336,6 +336,23 @@ inside Nav2 drives too (`RobotNavManager.set_lane_source`, polled every 0.3 s): 
 ≤ 1.0 m of path left on a drive to an object or a person ends as `succeeded` (the camera kept the
 standoff); earlier it ends `failed: blocked by X near (x, z) (seen by the camera N m ahead)`.
 
+### S8 runs 3 and 4 (14:07, 14:10): the camera check tuned in the drive
+
+- Run 3: unknown-id error pass; goal A planned; `cancel_nav` pass; the full drive ended
+  **`failed: blocked near (0.88, −0.21) (seen by the camera 0.00 m ahead)`** after 0.52 m, with
+  nothing within 1 m (lidar 1.09 m ahead afterwards; a fresh depth frame had 0 saturated lane
+  samples): the robot was turning past the sofa and one frame showed the minimum-range value.
+  Fix: saturation has to persist two checks (0.6 s) and 40 samples (`LANE_SATURATED_FRAMES`,
+  `LANE_SATURATED_POINTS`).
+- Run 4: the full drive ended **`failed: blocked by Sofa near (1.40, 0.06) (seen by the camera 0.60 m
+  ahead)`** after 0.77 m: a real reading (lidar 0.71 m ahead at the stop), the blocker named from
+  the registry (pass for the naming), but the stop itself is wrong: the MPPI controller curves
+  past the sofa closer than 0.6 m on purpose, the sofa is in the costmap. Fix: a separate in-drive
+  threshold `NAV_LANE_STOP_M` 0.45 (at the Kinect's saturation floor: in practice "something inside
+  0.5 m of the lens for two checks"), blind `do_move` drives keep 0.6.
+- Preemption (goal B) still untested: the plant was not in the one view the station took for it.
+  The station now falls back to any other visible object for goal B.
+
 Detector verdict after S1: distances within 4 cm for every object seen (except the backpack's
 +18 cm in round 1); labels miss for a flat box ("Bench"), a water bottle ("GarbageCan"); object
 families right for the chair and the spray bottle. Actions for the boundary restart: add prompts
