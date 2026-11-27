@@ -23,6 +23,11 @@ from nav2_msgs.action import BackUp, DriveOnHeading, Spin
 from gpt_pet_mcp import config
 from gpt_pet_mcp.ros_bridge import ActionCall, RosBridge
 
+
+def _wrap(angle: float) -> float:
+    """Radians wrapped to (-pi, pi]."""
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
 _DIRECTION = {"MoveAhead": "ahead", "MoveBack": "back", "MoveLeft": "to the left", "MoveRight": "to the right"}
 
 
@@ -106,17 +111,35 @@ class Moves:
         side_deg = 90.0 if sign > 0 else -90.0  # lidar sector on the moving side, robot frame
         blocker: Optional[str] = None
         moved = 0.0
+        err = 0.0  # heading error (rad, +ccw) against the start, from the odom yaw
+        max_err = 0.0
+        kp, max_wz = config.STRAFE_YAW_KP, config.STRAFE_YAW_MAX_WZ
+        abort = math.radians(config.STRAFE_YAW_ABORT_DEG)
         started = time.monotonic()
+
+        def lateral(pose: tuple) -> float:
+            return abs((pose[0] - x0) * left[0] + (pose[1] - y0) * left[1])
+
         try:
             while True:
                 if self._clearance(side_deg) < config.STRAFE_CLEAR_M:
                     blocker = self._blocker(-side_deg)  # bearing: positive to the right
                     break
-                bridge.publish_twist(vy=sign * config.STRAFE_SPEED_MPS)
-                time.sleep(0.1)
+                pose = bridge.odom_pose()
+                wz = 0.0
+                if pose is not None:
+                    err = _wrap(pose[2] - theta0)
+                    max_err = max(max_err, abs(err))
+                    if abs(err) > abort:
+                        blocker = f"heading drift ({math.degrees(err):+.0f} degrees)"
+                        break
+                    if kp > 0.0:
+                        wz = max(-max_wz, min(max_wz, -kp * err))
+                bridge.publish_twist(vy=sign * config.STRAFE_SPEED_MPS, wz=wz)
+                time.sleep(0.05)
                 pose = bridge.odom_pose()
                 if pose is not None:
-                    moved = abs((pose[0] - x0) * left[0] + (pose[1] - y0) * left[1])
+                    moved = lateral(pose)
                 if moved >= magnitude:
                     break
                 if time.monotonic() - started > config.STRAFE_MAX_S:
@@ -124,15 +147,39 @@ class Moves:
                     break
         finally:
             bridge.stop_robot(5)
+        if kp > 0.0:
+            self._square_up(theta0)
         pose = bridge.odom_pose()
         if pose is not None:
-            moved = abs((pose[0] - x0) * left[0] + (pose[1] - y0) * left[1])
-        logger.info("Strafe {} {:.2f} m: moved {:.2f} m{}", direction, magnitude, moved, f", blocked by {blocker}" if blocker else "")
+            moved = lateral(pose)
+            err = _wrap(pose[2] - theta0)
+        logger.info("Strafe {} {:.2f} m: moved {:.2f} m, heading error peak {:.1f} deg, final {:.1f} deg{}", direction, magnitude, moved,
+                    math.degrees(max_err), math.degrees(err), f", blocked by {blocker}" if blocker else "")
         if blocker is None:
             return f"Successfully moved {moved:.2f} m {direction}"
         if moved > 0.01:
             return f"Moved {moved:.2f} of {magnitude:.2f} m {direction}, then blocked by {blocker}"
         return f"Move blocked by {blocker}: did not move"
+
+    def _square_up(self, theta0: float) -> None:
+        """Turn on the spot until the odom yaw is back within STRAFE_SQUARE_DEG of theta0."""
+        bridge = self._bridge
+        tol = math.radians(config.STRAFE_SQUARE_DEG)
+        deadline = time.monotonic() + config.STRAFE_SQUARE_MAX_S
+        try:
+            while time.monotonic() < deadline:
+                pose = bridge.odom_pose()
+                if pose is None:
+                    return
+                err = _wrap(pose[2] - theta0)
+                if abs(err) <= tol:
+                    return
+                wz = -config.STRAFE_YAW_KP * err
+                wz = math.copysign(max(0.25, min(config.STRAFE_YAW_MAX_WZ, abs(wz))), wz)  # above the drive's dead band
+                bridge.publish_twist(wz=wz)
+                time.sleep(0.05)
+        finally:
+            bridge.stop_robot(5)
 
     def _clearance(self, side_deg: float) -> float:
         """Nearest lidar return (m) inside a STRAFE_SECTOR_DEG sector around `side_deg` of the robot

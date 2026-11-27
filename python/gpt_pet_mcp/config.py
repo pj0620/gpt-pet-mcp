@@ -79,10 +79,21 @@ TF_TIMEOUT_S = 0.3
 ROBOT_MAX_SPEED_MPS = _env_float("GPTPET_MCP_MAX_SPEED_MPS", 0.1)
 """What the robot drives at: Nav2's MPPI vx_max (nav2_params.yaml). set_nav_goal's speed_mps is
 clamped to the contract's range but a drive never goes faster than this."""
-STRAFE_SPEED_MPS = 0.1
-STRAFE_MAX_S = 10.0
+STRAFE_SPEED_MPS = _env_float("GPTPET_MCP_STRAFE_SPEED_MPS", 0.07)
+"""Lateral speed. The mecanum base slips sideways on hard floor and yaws while it does, so strafes
+go slower than drives and hold their heading (below)."""
+STRAFE_MAX_S = 15.0
 STRAFE_CLEAR_M = 0.30  # a lidar return closer than this on the moving side stops a strafe
 STRAFE_SECTOR_DEG = 60.0
+STRAFE_YAW_KP = _env_float("GPTPET_MCP_STRAFE_YAW_KP", 2.0)
+"""Heading hold during a strafe: wz = -KP * (yaw - yaw at start), from the odom (EKF) yaw. 0 turns
+the hold off. Measured 2026-11-27 without it: a 0.3 m strafe yawed the robot 45-170 degrees."""
+STRAFE_YAW_MAX_WZ = _env_float("GPTPET_MCP_STRAFE_YAW_MAX_WZ", 0.6)
+STRAFE_YAW_ABORT_DEG = _env_float("GPTPET_MCP_STRAFE_YAW_ABORT_DEG", 35.0)
+"""A strafe stops (reported as blocked by heading drift) when the hold cannot keep the heading
+within this of the start."""
+STRAFE_SQUARE_DEG = 3.0  # after a strafe the robot turns back on the spot to within this of its start heading
+STRAFE_SQUARE_MAX_S = 4.0
 PLAN_TIMEOUT_S = 5.0
 CANCEL_TIMEOUT_S = 3.0
 ACTION_ACCEPT_TIMEOUT_S = 5.0
