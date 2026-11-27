@@ -398,6 +398,35 @@ So S8 passes: unknown id, immediate view, preemption (runs 5–6), cancel (runs 
 (this run). Not done: the speed check (`s8 --step speed`) and the named-blocker half. The two
 controller findings go to gpt-pet-v2: no Omni on this base, and the MPPI dithering at 0.1 m/s.
 
+### S8 full sequence on the user's re-set scene (14:40, chair 200 cm, box 150 cm ahead / 60 cm right)
+
+| step | result |
+|---|---|
+| `set_nav_goal("obj:nope")` | "Unknown destination id 'obj:nope'. Call get_current_view or list_destinations first." |
+| `do_look up` then goal A | the view after the goal reports `camera.tilt_deg 0` (levelled for the drive) |
+| goal A = chair | `following`, path 3 corners |
+| goal B = box after 2 s | **`preempted_goal_id` = goal A's id**, status shows goal B |
+| `cancel_nav` after 3 s | `{"canceled": true, "state": "canceled"}` |
+| full drive to the chair | **`succeeded` in 20 s, 1.65 m, heading within 25° of travel, no recoveries, no lane stop**; lidar 0.49 m ahead at the end; the chair not in the final view (below the camera's view this close) |
+
+Detector distances from HOME: box 1.4 m (tape range 1.62), chair 2.6 m (tape 2.0 to the nearest
+face; the detected centre is the seat/back). **The user's tape of the gap: 85 cm** (bumper → the
+chair's nearest part), i.e. the 0.7 m standoff from the detected centre lands 0.85 m from the
+legs: inside the 0.3–0.9 m band. The robot ended beside the chair rather than square to it (the
+goal yaw points at the target from the standoff cell, which here lay to the side): fine for the
+contract, worth a "face the target" turn at the end later.
+
+**Speed check** (`s8 --step speed`, 14:45): `set_nav_goal(chair, speed_mps=0.05)` covered **1.12 m
+in 10 s**, the default drive 1.18 m in its first 10 s: the speed limit has **no effect**. Decision
+table → document the fixed 0.1 m/s (Nav2's MPPI ignores `/speed_limit` as published, or the limit
+is applied after the fact); the contract's `speed_mps` is accepted and reported but not enforced.
+
+S8 verdict: pass on every tool call (unknown id, tilt levelled, goal, preemption, cancel, full drive,
+status fields), standoff inside the band; speed limit not enforced; the named-blocker half of a
+blocked drive still unseen.
+
+Detector verdict after S1:
+
 Detector verdict after S1: distances within 4 cm for every object seen (except the backpack's
 +18 cm in round 1); labels miss for a flat box ("Bench"), a water bottle ("GarbageCan"); object
 families right for the chair and the spray bottle. Actions for the boundary restart: add prompts
