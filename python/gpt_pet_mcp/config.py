@@ -116,7 +116,8 @@ disables the check."""
 SIDESTEP_MODE = _env_str("GPTPET_MCP_SIDESTEP_MODE", "turn")
 """How MoveLeft/MoveRight are done: "turn" = turn 90 degrees to that side, drive the distance, turn
 back (the mecanum wheels used like normal wheels; the user's choice 2026-11-27 after the strafes
-slipped 2:1 sideways and yawed); "strafe" = a sideways velocity with the heading hold below."""
+slipped 2:1 sideways and yawed); "strafe" = a sideways velocity with the heading hold below. Nav2's
+controller follows the same decision (motion_model DiffDrive in gpt-pet-v2's nav2_params.yaml)."""
 ROTATE_OVERSHOOT_DEG = _env_float("GPTPET_MCP_ROTATE_OVERSHOOT_DEG", 7.0)
 """Nav2's Spin stops this many degrees late on this robot (measured 2026-11-27: 10 -> 17, 30 -> 37,
 90 -> 100); do_rotate asks for the requested angle minus this. 0 disables the correction."""

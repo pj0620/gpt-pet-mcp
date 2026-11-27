@@ -353,6 +353,51 @@ standoff); earlier it ends `failed: blocked by X near (x, z) (seen by the camera
 - Preemption (goal B) still untested: the plant was not in the one view the station took for it.
   The station now falls back to any other visible object for goal B.
 
+### S8 run 5 (14:13): preemption passes; the camera stops the drive for a can in the hallway
+
+- **Preemption passes**: goal B (the rug, the only other object in view; 0.21 m path) returned
+  `preempted_goal_id` = goal A's id, `get_nav_status` showed goal B; it finished in 2 s so the
+  `cancel_nav` 3 s later found nothing to cancel (`{"canceled": false, "state": "succeeded"}`),
+  which is the right answer for an idle robot (the cancel of a live drive passed in runs 2–4).
+- Full drive: stopped after 1.06 m by the camera check (saturation, two checks) with a **black
+  cylindrical can dead ahead at ≈ 0.5 m** (lidar 0.58 m) and the chair still 2.0 m away on the
+  left; the station's arrival rule (≤ 1 m of path left) called it `succeeded`. The stop was right,
+  the label wrong: the arrival now also requires the destination within 1.5 m
+  (`LANE_ARRIVAL_TARGET_M`), otherwise "blocked by X"; and a Nav2 drive watches a 0.3 m wide lane
+  (`NAV_LANE_HALF_WIDTH_M` 0.15) so furniture passed close on one side does not stop it.
+
+### S8 run 6 (14:16)
+
+Preemption passes again (goal B = the sofa). The full drive to the chair: 24 s, 2.58 m of
+progress summed for 0.75 m of net advance (the controller dithering around the can in the
+hallway), the robot ended turned ≈ 90° toward the sofa and the camera stopped it (saturation,
+lidar 0.56 m ahead): `failed: blocked near (0.93, 0.11) (seen by the camera 0.00 m ahead)`. With
+the can standing in the 1.5 m hallway between HOME and the chair, MPPI does not find its way past
+at 0.1 m/s; the chair drive succeeded once (run 2) before the can was there. S8 verdict so far:
+unknown id, immediate view, preemption, cancel: pass; full drive: pass only without the can;
+standoff gap: not measured (the one arrival was into the seat).
+
+### S8: the root cause of the hallway drives, and the drive that worked (14:20–14:37)
+
+Tracing the pose during the chair drives showed the same shape every time: within 5 s of
+starting, the SLAM yaw went from ≈ 92 (facing the hallway) to ≈ 5 while x kept growing, i.e. the
+robot **turned ~90° and crabbed sideways down the hallway**. Nav2's MPPI controller had
+`motion_model: "Omni"` (a trial since 11-24) and was commanding `vy`: the mecanum strafe that
+S6 measured as slipping 2:1 and yawing, now under the controller, with the camera pointed at the
+sofa instead of the direction of travel, which is what the lane check kept stopping. A live
+`ros2 param set` to DiffDrive was accepted but left the optimizer resetting ("Failed to make
+progress" ×26, "Optimizer reset" ×14, 14 recoveries, a `home` drive that timed out). A clean
+restart of the server stack with `motion_model: "DiffDrive"`, `vy_max 0`, `vy_std 0` (gpt-pet-v2
+feature branch, patched on pj-ubuntu) fixed it:
+
+**14:37 drive to the chair: `succeeded` in 16 s, 1.54 m, heading within ±20° of the direction of
+travel the whole way, no recoveries, no lane stop; lidar 0.88 m ahead at the end.** The user's
+tape of the gap: pending.
+
+So S8 passes: unknown id, immediate view, preemption (runs 5–6), cancel (runs 2–4), the full drive
+(this run). Not done: the speed check (`s8 --step speed`) and the named-blocker half. The two
+controller findings go to gpt-pet-v2: no Omni on this base, and the MPPI dithering at 0.1 m/s.
+
 Detector verdict after S1: distances within 4 cm for every object seen (except the backpack's
 +18 cm in round 1); labels miss for a flat box ("Bench"), a water bottle ("GarbageCan"); object
 families right for the chair and the spray bottle. Actions for the boundary restart: add prompts

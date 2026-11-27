@@ -724,6 +724,24 @@ async def snap(args) -> None:
         print(json.dumps(await st.status(), indent=1)[:600])
 
 
+async def drive(args) -> None:
+    """One drive to the first destination with this label, polled to its end, with a final view."""
+    async with Station(f"drive_{args.label.lower()}") as st:
+        dest = await st.wait_label(args.label, 60.0, every_s=2.0)
+        if not dest:
+            return
+        started = await st.call("set_nav_goal", {"destination_id": dest["id"]})
+        seen = await st.wait_nav(180.0, views_every_s=2.0)
+        final = await st.view("arrived")
+        st.pose_truth(f"drive to {args.label} end")
+        st.measure(f"bumper -> nearest part of the {args.label}", f"{args.label} gap")
+        summary = {"dest": dest, "started": started, "states": [s["state"] for s in seen][-12:], "final": seen[-1] if seen else None,
+                   "traveled": [s["progress"]["distance_traveled_m"] for s in seen if s.get("progress")][-3:],
+                   "in_final_view": [d for d in final.get("destinations", []) if d["label"] == args.label]}
+        st.log("summary", **summary)
+        print(json.dumps({k: summary[k] for k in ("states", "final", "traveled", "in_final_view")}, indent=1, default=str)[:1500])
+
+
 async def go(args) -> None:
     """The user said 'down' (or reported a number): release the station blocked in wait_go()."""
     OUT.mkdir(parents=True, exist_ok=True)
@@ -763,6 +781,7 @@ def main() -> None:
     p = sub.add_parser("home"); p.add_argument("--store", action="store_true"); p.set_defaults(fn=home)
     p = sub.add_parser("snap"); p.add_argument("--name", default=None); p.set_defaults(fn=snap)
     sub.add_parser("go").set_defaults(fn=go)
+    p = sub.add_parser("drive"); p.add_argument("--label", default="Chair"); p.set_defaults(fn=drive)
     p = sub.add_parser("report"); p.add_argument("station_name"); p.add_argument("text", nargs="+"); p.add_argument("--go", action="store_true"); p.set_defaults(fn=report)
     args = parser.parse_args()
     asyncio.run(args.fn(args))
