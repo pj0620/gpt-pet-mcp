@@ -170,6 +170,8 @@ class Robot:
         what catches bottles, shoes and low boxes that the lidar plane never puts in the costmap."""
         import numpy as np
 
+        if not hasattr(self, "_lane_saturated_streak"):
+            self._lane_saturated_streak = 0
         try:
             frame = self.camera.latest_pair()
         except Exception:  # noqa: BLE001 - no frame, no opinion
@@ -185,8 +187,12 @@ class Robot:
         x = d * (us - intr.cx) / intr.fx  # right of the camera
         height = config.CAMERA_HEIGHT_M - d * (vs - intr.cy) / intr.fy  # above the floor, camera level
         lane = (np.abs(x) < config.LANE_HALF_WIDTH_M) & (height > config.LANE_MIN_HEIGHT_M) & (height < config.LANE_MAX_HEIGHT_M)
-        if int((lane & (d <= config.LANE_SATURATION_M)).sum()) >= config.LANE_SATURATED_POINTS:
-            return 0.0  # the Kinect's minimum-range value: something is closer than it can measure
+        saturated = int((lane & (d <= config.LANE_SATURATION_M)).sum()) >= config.LANE_SATURATED_POINTS
+        # the minimum-range value also shows up for a frame or two while the robot turns past
+        # something close to the side, so it has to persist before it counts as contact range
+        self._lane_saturated_streak = self._lane_saturated_streak + 1 if saturated else 0
+        if self._lane_saturated_streak >= config.LANE_SATURATED_FRAMES:
+            return 0.0  # something is closer than the Kinect can measure
         if int(lane.sum()) < config.LANE_MIN_POINTS:
             return None
         z = np.sort(d[lane])

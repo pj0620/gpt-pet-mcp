@@ -89,7 +89,8 @@ LANE_SATURATION_M = 0.53
 """The Kinect returns ~0.52 m for anything closer than its minimum range instead of nothing
 (measured 2026-11-27: two frames bottomed out at 0.519 and 0.521 with a bottle against the robot).
 Lane samples at or under this read as 'in contact range'."""
-LANE_SATURATED_POINTS = 20
+LANE_SATURATED_POINTS = 40
+LANE_SATURATED_FRAMES = 2  # consecutive checks that must see saturation before it counts (one frame flickers while turning)
 LANE_CHECK_PERIOD_S = 0.3  # how often a Nav2 drive consults the Kinect lane check
 LANE_ARRIVAL_REMAINING_M = 1.0
 """A lane stop with no more path left than this, on a drive to an object or a person, counts as
