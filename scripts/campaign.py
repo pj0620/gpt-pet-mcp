@@ -272,17 +272,37 @@ def yaw_delta(a: float, b: float) -> float:
 # --- stations -------------------------------------------------------------------------------------
 
 
+DEFAULT_ROUNDS = {1: "Box=1.0,Backpack=2.0,Chair=3.0", 2: "Bottle=1.0,Ball=2.0,HousePlant=3.0,Shoe=2.0/0.8L"}
+
+
+def parse_objects(spec: Optional[str]) -> List[dict]:
+    """The user's objects (guide page 0d, or their tape readings): 'Box=1.02,Shoe=2.0/0.8L' ->
+    [{label, ahead_m, side_m (+ right, - left), range_m, bearing_deg}] in the robot's frame."""
+    out = []
+    for item in (spec or "").split(","):
+        if "=" not in item:
+            continue
+        label, value = item.split("=", 1)
+        ahead, side = (value.split("/", 1) + ["0"])[:2]
+        sign = -1.0 if side.strip().upper().endswith("L") else 1.0
+        side_m = sign * float(side.strip().rstrip("LRlr") or 0.0)
+        ahead_m = float(ahead)
+        out.append({"label": label.strip(), "ahead_m": ahead_m, "side_m": side_m, "range_m": round(math.hypot(ahead_m, side_m), 3), "bearing_deg": round(math.degrees(math.atan2(side_m, ahead_m)), 1)})
+    return out
+
+
+def describe_objects(objects: List[dict]) -> str:
+    return ", ".join(f"{o['label']} {o['ahead_m']:g} m" + (f" ahead and {abs(o['side_m']):g} m to the robot's {'left' if o['side_m'] < 0 else 'right'}" if o["side_m"] else "") for o in objects)
+
+
 async def s1(args) -> None:
-    rounds = {1: ["Box", "Backpack", "Chair"], 2: ["Bottle", "Ball", "HousePlant", "Shoe"]}
-    expected = rounds[args.round]
-    marks = {1: {"Box": 1.0, "Backpack": 2.0, "Chair": 3.0}, 2: {"Bottle": 1.0, "Ball": 2.0, "HousePlant": 3.0, "Shoe": math.hypot(2.0, 0.8)}}[args.round]
-    for pair in (args.measured or "").split(","):  # Label=metres: the user's tape readings, if known
-        if "=" in pair:
-            label, value = pair.split("=", 1)
-            marks[label.strip()] = float(value)
-    places = {1: "box 1.0 m, backpack 2.0 m, chair 3.0 m", 2: "bottle 1.0 m, ball 2.0 m, plant 3.0 m, shoe 2.0 m ahead and 0.8 m to the robot's left"}[args.round]
+    objects = parse_objects(args.objects or DEFAULT_ROUNDS[args.round])
+    expected = [o["label"] for o in objects]
+    marks = {o["label"]: o["range_m"] for o in objects}
+    bearing_expected = {o["label"]: o["bearing_deg"] for o in objects}
     async with Station(f"s1_r{args.round}") as st:
-        st.cue(f"round {args.round}: tape from the front bumper to the nearest face, centred on its heading: {places}; report the readings, step out of the picture")
+        st.log("objects", objects=objects)
+        st.cue(f"round {args.round}: tape from the front bumper to the nearest face: {describe_objects(objects)}; report the readings, step out of the picture")
         if not await st.wait_go("objects placed and measured"):
             return
         st.note("waiting for the first of the expected labels")
@@ -306,7 +326,7 @@ async def s1(args) -> None:
                         bearings.setdefault(d["label"], []).append(round(math.degrees(math.atan((u - 250.0) / (525.0 * 500 / 640))), 1))
                 elif d["kind"] == "object":
                     extras[d["label"]] = extras.get(d["label"], 0) + 1
-        summary = {label: {"hits": len(hits[label]), "distances": hits[label], "mark_m": marks[label], "bearings_deg": bearings.get(label)} for label in expected}
+        summary = {label: {"hits": len(hits[label]), "distances": hits[label], "mark_m": marks[label], "bearings_deg": bearings.get(label), "bearing_expected_deg": bearing_expected[label]} for label in expected}
         summary["false_labels_per_view"] = round(sum(extras.values()) / 3.0, 2)
         summary["extras"] = extras
         ids = [sorted(d["id"] for d in v.get("destinations", [])) for v in views]
@@ -444,10 +464,10 @@ async def s6(args) -> None:
 
 async def s7(args) -> None:
     async with Station("s7") as st:
-        st.cue(f"box with its nearest face 0.5 m from the bumper (tape it, report it as 'box: NN cm'), centred on its heading; {MARKER}; step back, say 'down'")
-        if not await st.wait_go("box and marker down"):
+        st.cue(f"{args.blocker} with its nearest face {args.distance:g} m from the bumper (tape it, report it as '{args.blocker}: NN cm'), centred on its heading; {MARKER}; step back, say 'down'")
+        if not await st.wait_go("blocker and marker down"):
             return
-        box = await st.wait_label("Box", 60.0, every_s=2.0, max_d=1.2)
+        box = await st.wait_label(args.blocker, 60.0, every_s=2.0, max_d=args.distance + 0.7)
         before = st.pose_truth("before blocked move")
         text = await st.call("do_move", {"action": "MoveAhead", "moveMagnitude": 2.0})
         after = st.pose_truth("after blocked move")
@@ -460,15 +480,15 @@ async def s7(args) -> None:
         if not await st.wait_go("blocked distance reported"):
             return
         back = await st.call("do_move", {"action": "MoveBack", "moveMagnitude": 0.25})
-        st.cue("take the box away")
+        st.cue(f"take the {args.blocker} away")
         st.log("summary", box=box, text=text, moved_slam=moved, text_ok=bool(match), back=back)
 
 
 async def s8(args) -> None:
     async with Station("s8" if args.step == "main" else "s8_speed") as st:
         if args.step == "speed":
-            st.note("speed check from HOME: 0.05 m/s toward the chair for 10 s, then cancel")
-            chair = await st.wait_label("Chair", 60.0, every_s=2.0)
+            st.note(f"speed check from HOME: 0.05 m/s toward the {args.goal_a} for 10 s, then cancel")
+            chair = await st.wait_label(args.goal_a, 60.0, every_s=2.0)
             if not chair:
                 return
             slow = await st.call("set_nav_goal", {"destination_id": chair["id"], "speed_mps": 0.05})
@@ -478,13 +498,13 @@ async def s8(args) -> None:
             await st.call("cancel_nav")
             st.log("summary_speed", slow=slow, traveled_10s=s_slow.get("progress"), elapsed=round(time.time() - t0, 1))
             print("slow drive 10 s:", s_slow.get("progress"))
-            st.cue("take the chair and the box away")
+            st.cue(f"take the {args.goal_a} and the {args.goal_b} away")
             return
-        st.cue("chair with its nearest face 2.5 m from the bumper, centred on its heading; box 2.0 m ahead and 0.8 m to the robot's right; tape both, report as 'chair: NN cm, box: NN cm'; out of the picture, say 'down'")
-        if not await st.wait_go("chair and box placed"):
+        st.cue(f"goal A: {args.goal_a}, nearest face 2.0-3.0 m from the bumper on its heading; goal B: {args.goal_b}, 1.5-2.5 m ahead and 0.6-1.0 m to one side (guide page 8); tape both, report as '{args.goal_a}: NN cm, {args.goal_b} ahead: NN cm, {args.goal_b} left/right: NN cm'; out of the picture, say 'down'")
+        if not await st.wait_go("goal objects placed"):
             return
-        chair = await st.wait_label("Chair", 120.0, every_s=2.0)
-        box = next((d for d in (await st.view("find_box")).get("destinations", []) if d["label"] == "Box"), None)
+        chair = await st.wait_label(args.goal_a, 120.0, every_s=2.0)
+        box = next((d for d in (await st.view("find_goal_b")).get("destinations", []) if d["label"] == args.goal_b), None)
         if not chair:
             return
         err = await st.call("set_nav_goal", {"destination_id": "obj:nope"})
@@ -512,7 +532,7 @@ async def s8(args) -> None:
         }
         st.log("summary", **summary)
         print(json.dumps(summary, indent=2, default=str)[:3000])
-        st.measure("bumper -> nearest part of the chair", "chair gap", "leave the chair and the box where they are, out of the picture")
+        st.measure(f"bumper -> nearest part of the {args.goal_a}", f"{args.goal_a} gap", f"leave the {args.goal_a} and the {args.goal_b} where they are, out of the picture")
 
 
 async def s9(args) -> None:
@@ -528,14 +548,14 @@ async def s9(args) -> None:
         cues = {
             "a": "the moment the robot rolls, stand in the doorway and stay there",
             "b": "block the doorway again; when it stops in front of you count 8 s, then step aside",
-            "c": "when it starts rolling, put the box about 1 m ahead of it; take it away once it has stopped or passed",
+            "c": f"when it starts rolling, put the {args.obstacle} about 1 m ahead of it; take it away once it has stopped or passed",
         }
         st.cue(cues[args.step])
         started = await st.call("set_nav_goal", {"destination_id": goal})
         seen = await st.wait_nav(150.0, views_every_s=2.0)
         st.pose_truth(f"s9{args.step} end")
         if args.step == "c":
-            st.measure("bumper -> box, if it stopped short of the box", "box gap", "then take the box away")
+            st.measure(f"bumper -> {args.obstacle}, if it stopped short of it", f"{args.obstacle} gap", f"then take the {args.obstacle} away")
         elif args.step == "b":
             st.cue("out of the picture; the robot drives back to HOME next")
         summary = {"goal": goal, "started": started, "states": [s["state"] for s in seen][-20:], "final": seen[-1] if seen else None, "seconds": round(time.time() - st.t_start, 1)}
@@ -723,15 +743,15 @@ async def report(args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="station", required=True)
-    p = sub.add_parser("s1"); p.add_argument("--round", type=int, default=1); p.add_argument("--measured", default=None, help="Label=metres,... the user's tape readings"); p.set_defaults(fn=s1)
+    p = sub.add_parser("s1"); p.add_argument("--round", type=int, default=1); p.add_argument("--objects", "--measured", dest="objects", default=None, help="the user's objects and tape readings: 'Box=1.02,Shoe=2.0/0.8L' (ahead[/side L|R] in m); default: the plan's round"); p.set_defaults(fn=s1)
     p = sub.add_parser("s2"); p.add_argument("--distance", type=float, default=2.0, help="target distance in m the user stands at"); p.set_defaults(fn=s2)
     p = sub.add_parser("s3"); p.add_argument("--wall", choices=("left", "right"), default="left"); p.set_defaults(fn=s3)
     sub.add_parser("s4").set_defaults(fn=s4)
     sub.add_parser("s5").set_defaults(fn=s5)
     sub.add_parser("s6").set_defaults(fn=s6)
-    sub.add_parser("s7").set_defaults(fn=s7)
-    p = sub.add_parser("s8"); p.add_argument("--step", choices=("main", "speed"), default="main"); p.set_defaults(fn=s8)
-    p = sub.add_parser("s9"); p.add_argument("--step", choices=("a", "b", "c"), required=True); p.add_argument("--goal", default=None); p.set_defaults(fn=s9)
+    p = sub.add_parser("s7"); p.add_argument("--blocker", default="Box", help="label of the object placed in the way"); p.add_argument("--distance", type=float, default=0.5, help="its nearest face, m from the bumper (0.4-0.7)"); p.set_defaults(fn=s7)
+    p = sub.add_parser("s8"); p.add_argument("--step", choices=("main", "speed"), default="main"); p.add_argument("--goal-a", dest="goal_a", default="Chair"); p.add_argument("--goal-b", dest="goal_b", default="Box"); p.set_defaults(fn=s8)
+    p = sub.add_parser("s9"); p.add_argument("--step", choices=("a", "b", "c"), required=True); p.add_argument("--goal", default=None); p.add_argument("--obstacle", default="Box", help="label of the object put in the path (step c)"); p.set_defaults(fn=s9)
     sub.add_parser("s10").set_defaults(fn=s10)
     p = sub.add_parser("s11"); p.add_argument("--step", choices=("a", "b", "c"), required=True); p.set_defaults(fn=s11)
     sub.add_parser("s12").set_defaults(fn=s12)
