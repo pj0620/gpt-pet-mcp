@@ -5,7 +5,13 @@ so nobody has to say "now". Writes ~/robot-rig/campaign/<date>/<station>.jsonl a
 ipad_clip.sh line that cuts the station's clip.
 
     uv run --extra dev python scripts/campaign.py s1 --round 1
-    uv run --extra dev python scripts/campaign.py s8 --chair obj:chair#1 --box obj:box#1
+    uv run --extra dev python scripts/campaign.py s6          # in the background: it waits for `go`
+    uv run --extra dev python scripts/campaign.py go          # the user said "down" (marker placed)
+    uv run --extra dev python scripts/campaign.py report s6 "MoveAhead 0.5: 48 cm" --go
+
+Metric truth is the user's tape measure, not floor marks: before a move the station cues
+"marker at the bumper" and blocks on `go`; after it, "measure marker -> bumper, report". The
+reported numbers go into the station's jsonl with `report`. No tape ticks on the floor.
 
 Env: GPTPET_MCP_ROBOT_URL (default http://pj-ubuntu.local:8000/mcp), CAMPAIGN_DIR, PJSSH (an ssh
 command for pj-ubuntu, used for pose_truth.py and depth_rows.py; default `ssh pj-ubuntu.local`).
@@ -35,6 +41,8 @@ OUT = Path(os.environ.get("CAMPAIGN_DIR", f"~/robot-rig/campaign/{dt.date.today(
 PJSSH = os.environ.get("PJSSH", "ssh pj-ubuntu.local")
 REMOTE_PREFIX = "export PATH=$HOME/.local/bin:$PATH; source /opt/ros/humble/setup.bash; source ~/gpt-pet-mcp/env/pj-ubuntu.env; cd ~/gpt-pet-mcp && uv run python"
 TERMINAL = {"succeeded", "failed", "canceled"}
+GO_FLAG = OUT / "go"  # touched by `campaign.py go`; a station blocked in wait_go() moves on
+MARKER = "the marker on the floor at the centre of the front bumper"
 
 
 def clock(t: Optional[float] = None) -> str:
@@ -64,6 +72,7 @@ class Station:
         self.t_start = time.time()
         self.images = 0
         self.client: Optional[Client] = None
+        GO_FLAG.unlink(missing_ok=True)  # a stale go from an earlier station must not move the robot
         self.log("start", url=URL)
         print(f"== {name} started {clock(self.t_start)} -> {self.dir}")
 
@@ -89,6 +98,27 @@ class Station:
     def note(self, text: str, **data: Any) -> None:
         self.log("note", text=text, **data)
         print(f"   {clock()} {text}", flush=True)
+
+    def marker(self, extra: str = "") -> None:
+        self.cue(f"put {MARKER}{', ' + extra if extra else ''}; step back and say 'down'")
+
+    def measure(self, what: str, tag: str, extra: str = "") -> None:
+        self.cue(f"measure {what} and report it as '{tag}: NN cm'{'; ' + extra if extra else ''}")
+
+    async def wait_go(self, why: str, timeout_s: float = 600.0) -> bool:
+        """Block until `campaign.py go` runs (the user has said 'down' or reported a number).
+        The robot never moves while the user may still be at the bumper."""
+        self.note(f"waiting for go ({why})")
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if GO_FLAG.exists():
+                GO_FLAG.unlink(missing_ok=True)
+                self.log("go", why=why)
+                print(f"   {clock()} go ({why})", flush=True)
+                return True
+            await asyncio.sleep(0.5)
+        self.note(f"no go within {timeout_s:g} s; the station stops here")
+        return False
 
     async def call(self, tool: str, args: Optional[dict] = None, tag: str = "") -> Any:
         """Call a tool; return its payload (dict, str or {'error': text}); save image blocks."""
@@ -246,10 +276,17 @@ async def s1(args) -> None:
     rounds = {1: ["Box", "Backpack", "Chair"], 2: ["Bottle", "Ball", "HousePlant", "Shoe"]}
     expected = rounds[args.round]
     marks = {1: {"Box": 1.0, "Backpack": 2.0, "Chair": 3.0}, 2: {"Bottle": 1.0, "Ball": 2.0, "HousePlant": 3.0, "Shoe": math.hypot(2.0, 0.8)}}[args.round]
+    for pair in (args.measured or "").split(","):  # Label=metres: the user's tape readings, if known
+        if "=" in pair:
+            label, value = pair.split("=", 1)
+            marks[label.strip()] = float(value)
+    places = {1: "box 1.0 m, backpack 2.0 m, chair 3.0 m", 2: "bottle 1.0 m, ball 2.0 m, plant 3.0 m, shoe 2.0 m ahead and 0.8 m to the robot's left"}[args.round]
     async with Station(f"s1_r{args.round}") as st:
-        st.cue(f"round {args.round}: " + ", ".join(f"{k} on {v if k != 'Shoe' else 'the left tick'}" for k, v in marks.items()) + "; then step out of the picture")
+        st.cue(f"round {args.round}: tape from the front bumper to the nearest face, centred on its heading: {places}; report the readings, step out of the picture")
+        if not await st.wait_go("objects placed and measured"):
+            return
         st.note("waiting for the first of the expected labels")
-        await st.wait_label(expected[0], 180.0, every_s=2.0)
+        await st.wait_label(expected[0], 120.0, every_s=2.0)
         views = []
         for i in range(3):
             views.append(await st.view(f"v{i + 1}"))
@@ -280,15 +317,17 @@ async def s1(args) -> None:
 
 
 async def s2(args) -> None:
-    async with Station(f"s2_{args.mark:g}m") as st:
-        st.cue(f"stand on the {args.mark:g} mark facing the robot, still, until the camera has tilted up and down twice")
-        person = await st.wait_label("Person", 180.0, every_s=2.0)
+    async with Station(f"s2_{args.distance:g}m") as st:
+        st.cue(f"stand about {args.distance:g} m in front of the robot, facing it; measure bumper to your toes, report it as 'stand: NN cm'; then stand still until the camera has tilted up and down twice")
+        if not await st.wait_go("person in place"):
+            return
+        person = await st.wait_label("Person", 120.0, every_s=2.0)
         out = []
         for cycle in range(2):
             for direction in ("straight", "up", "straight"):
                 text = await st.call("do_look", {"direction": direction})
                 v = await st.view(f"c{cycle}_{direction}")
-                rows = st.depth_rows(save=f"regression/data/robot_frames/s2_{args.mark:g}m_{direction}_{cycle}" if cycle == 0 else None)
+                rows = st.depth_rows(save=f"regression/data/robot_frames/s2_{args.distance:g}m_{direction}_{cycle}" if cycle == 0 else None)
                 people = [d for d in v.get("destinations", []) if d["label"] == "Person"]
                 out.append({
                     "direction": direction, "text": text, "camera": v.get("camera"),
@@ -307,12 +346,18 @@ async def s3(args) -> None:
         st.cue("doorway empty, nobody in the picture")
         far = [await st.view(f"far{i}") for i in range(3)]
         st.depth_rows(save="regression/data/robot_frames/s3_far")
+        st.marker()
+        if not await st.wait_go("marker down"):
+            return
         st.pose_truth("s3 before move")
         await st.call("do_move", {"action": "MoveAhead", "moveMagnitude": 1.0})
         st.pose_truth("s3 after move")
         await asyncio.sleep(1.0)
         near = [await st.view(f"near{i}") for i in range(3)]
         st.depth_rows(save="regression/data/robot_frames/s3_near")
+        st.measure("marker -> bumper centre", "MoveAhead 1.0", "pick the marker up, step back, say 'down'")
+        if not await st.wait_go("measurement reported"):
+            return
         side = "RotateLeft" if args.wall == "left" else "RotateRight"
         back = "RotateRight" if args.wall == "left" else "RotateLeft"
         await st.call("do_rotate", {"action": side, "degrees": 30})
@@ -340,7 +385,9 @@ async def s4(args) -> None:
 async def s5(args) -> None:
     seq = [("RotateLeft", 90), ("RotateRight", 90), ("RotateLeft", 30), ("RotateRight", 30)] + [("RotateLeft", 90)] * 4
     async with Station("s5") as st:
-        st.cue("1 m clear around the robot; it spins eight times")
+        st.marker("1 m clear around the robot: it spins eight times")
+        if not await st.wait_go("marker down"):
+            return
         await st.call("get_map", {}, "before")
         rows = []
         for action, deg in seq:
@@ -358,6 +405,7 @@ async def s5(args) -> None:
             rows.append(row)
             print(f"   -> {row}")
         await st.call("get_map", {}, "after")
+        st.measure("marker -> bumper centre", "4 spins closure", "and say whether it points at the doorway again: spot on, left of it, or right of it; then pick the marker up")
         ratios = [abs(r["slam_delta"]) / r["deg"] for r in rows if r.get("slam_delta") is not None]
         mean = sum(ratios) / len(ratios) if ratios else None
         cv = (math.sqrt(sum((x - mean) ** 2 for x in ratios) / len(ratios)) / mean) if ratios and mean else None
@@ -369,13 +417,17 @@ async def s5(args) -> None:
 async def s6(args) -> None:
     seq = [("MoveAhead", 0.5), ("MoveBack", 0.5), ("MoveRight", 0.3), ("MoveLeft", 0.3), ("MoveAhead", 1.0), ("MoveBack", 1.0)]
     async with Station("s6") as st:
-        st.cue("1.5 m clear ahead and 0.7 m each side; six short moves")
+        st.cue("1.5 m clear ahead and 0.7 m each side; six short moves, a marker and a measurement for each")
         rows = []
-        for action, mag in seq:
+        for i, (action, mag) in enumerate(seq):
+            st.marker()
+            if not await st.wait_go(f"marker down for {action} {mag:g}"):
+                return
             before = st.pose_truth(f"before {action} {mag}")
             text = await st.call("do_move", {"action": action, "moveMagnitude": mag})
             await asyncio.sleep(1.0)
             after = st.pose_truth(f"after {action} {mag}")
+            st.measure("marker -> bumper centre", f"{action} {mag:g}", "pick the marker up" if i == len(seq) - 1 else "then move the marker to the bumper again")
             row = {"action": action, "m": mag, "text": text}
             for src in ("wheel", "ekf", "slam"):
                 if before and after and before.get(src) and after.get(src):
@@ -392,8 +444,10 @@ async def s6(args) -> None:
 
 async def s7(args) -> None:
     async with Station("s7") as st:
-        st.cue("put the box with its front on the 0.5 mark, then step back")
-        box = await st.wait_label("Box", 120.0, every_s=2.0, max_d=1.2)
+        st.cue(f"box with its nearest face 0.5 m from the bumper (tape it, report it as 'box: NN cm'), centred on its heading; {MARKER}; step back, say 'down'")
+        if not await st.wait_go("box and marker down"):
+            return
+        box = await st.wait_label("Box", 60.0, every_s=2.0, max_d=1.2)
         before = st.pose_truth("before blocked move")
         text = await st.call("do_move", {"action": "MoveAhead", "moveMagnitude": 2.0})
         after = st.pose_truth("after blocked move")
@@ -402,15 +456,34 @@ async def s7(args) -> None:
             moved = round(math.hypot(after["slam"]["x"] - before["slam"]["x"], after["slam"]["y"] - before["slam"]["y"]), 3)
         match = re.match(r"^Moved (\d+\.\d\d) of 2\.00 m ahead, then blocked by (.+)$", text or "")
         st.note(f"blocked-move text ok: {bool(match)}; slam moved {moved} m")
+        st.measure("marker -> bumper centre", "blocked", "pick the marker up, step back, say 'down'; it backs up a little next")
+        if not await st.wait_go("blocked distance reported"):
+            return
         back = await st.call("do_move", {"action": "MoveBack", "moveMagnitude": 0.25})
         st.cue("take the box away")
         st.log("summary", box=box, text=text, moved_slam=moved, text_ok=bool(match), back=back)
 
 
 async def s8(args) -> None:
-    async with Station("s8") as st:
-        st.cue("chair on the 2.5 mark, box on the right tick (0.8 m right of the 2.0 mark); then out of the picture")
-        chair = await st.wait_label("Chair", 180.0, every_s=2.0)
+    async with Station("s8" if args.step == "main" else "s8_speed") as st:
+        if args.step == "speed":
+            st.note("speed check from HOME: 0.05 m/s toward the chair for 10 s, then cancel")
+            chair = await st.wait_label("Chair", 60.0, every_s=2.0)
+            if not chair:
+                return
+            slow = await st.call("set_nav_goal", {"destination_id": chair["id"], "speed_mps": 0.05})
+            t0 = time.time()
+            await asyncio.sleep(10.0)
+            s_slow = await st.status()
+            await st.call("cancel_nav")
+            st.log("summary_speed", slow=slow, traveled_10s=s_slow.get("progress"), elapsed=round(time.time() - t0, 1))
+            print("slow drive 10 s:", s_slow.get("progress"))
+            st.cue("take the chair and the box away")
+            return
+        st.cue("chair with its nearest face 2.5 m from the bumper, centred on its heading; box 2.0 m ahead and 0.8 m to the robot's right; tape both, report as 'chair: NN cm, box: NN cm'; out of the picture, say 'down'")
+        if not await st.wait_go("chair and box placed"):
+            return
+        chair = await st.wait_label("Chair", 120.0, every_s=2.0)
         box = next((d for d in (await st.view("find_box")).get("destinations", []) if d["label"] == "Box"), None)
         if not chair:
             return
@@ -439,15 +512,7 @@ async def s8(args) -> None:
         }
         st.log("summary", **summary)
         print(json.dumps(summary, indent=2, default=str)[:3000])
-        if args.speed:
-            st.note("speed check: 0.05 m/s for 10 s then cancel (robot must be back near HOME first)")
-            slow = await st.call("set_nav_goal", {"destination_id": chair["id"], "speed_mps": 0.05})
-            t0 = time.time()
-            await asyncio.sleep(10.0)
-            s_slow = await st.status()
-            await st.call("cancel_nav")
-            st.log("summary_speed", slow=slow, traveled_10s=s_slow.get("progress"), elapsed=round(time.time() - t0, 1))
-            print("slow drive 10 s:", s_slow.get("progress"))
+        st.measure("bumper -> nearest part of the chair", "chair gap", "leave the chair and the box where they are, out of the picture")
 
 
 async def s9(args) -> None:
@@ -469,6 +534,10 @@ async def s9(args) -> None:
         started = await st.call("set_nav_goal", {"destination_id": goal})
         seen = await st.wait_nav(150.0, views_every_s=2.0)
         st.pose_truth(f"s9{args.step} end")
+        if args.step == "c":
+            st.measure("bumper -> box, if it stopped short of the box", "box gap", "then take the box away")
+        elif args.step == "b":
+            st.cue("out of the picture; the robot drives back to HOME next")
         summary = {"goal": goal, "started": started, "states": [s["state"] for s in seen][-20:], "final": seen[-1] if seen else None, "seconds": round(time.time() - st.t_start, 1)}
         st.log("summary", **summary)
         print(json.dumps(summary, indent=2, default=str)[:2500])
@@ -476,8 +545,10 @@ async def s9(args) -> None:
 
 async def s10(args) -> None:
     async with Station("s10") as st:
-        st.cue("stand on the 3.0 mark facing the robot, still")
-        person = await st.wait_label("Person", 180.0, every_s=2.0, min_d=2.4, max_d=3.8)
+        st.cue("stand about 3 m in front of the robot, facing it; tape bumper -> toes, report it as 'stand: NN cm'; then stand still")
+        if not await st.wait_go("person at 3 m"):
+            return
+        person = await st.wait_label("Person", 120.0, every_s=2.0, min_d=2.2, max_d=3.8)
         if not person:
             return
         await st.call("do_rotate", {"action": "RotateLeft", "degrees": 50})
@@ -495,9 +566,20 @@ async def s10(args) -> None:
         stop.set()
         samples = await watch
         final = await st.view("final")
-        summary = {"first": first, "t_framed_s": t_framed, "t_approaching_s": t_appr, "t_done_s": t_done, "done": done, "person_in_final": [d for d in final.get("destinations", []) if d["label"] == "Person"], "samples": len(samples)}
+        ended = await st.call("cancel_attention")  # the robot stays put while the user measures
+        st.measure("bumper -> toes", "approach gap", "then stay where you are")
+        summary = {"first": first, "t_framed_s": t_framed, "t_approaching_s": t_appr, "t_done_s": t_done, "done": done, "person_in_final": [d for d in final.get("destinations", []) if d["label"] == "Person"], "samples": len(samples), "ended": ended}
         st.log("summary", **summary)
         print(json.dumps(summary, indent=2, default=str))
+
+
+async def engage(st: Station, min_d: float = 0.6, max_d: float = 4.0) -> Optional[dict]:
+    """Find the person in view and set attention on them; return the first framed status."""
+    person = await st.wait_label("Person", 60.0, every_s=2.0, min_d=min_d, max_d=max_d)
+    if not person:
+        return None
+    await st.call("set_attention", {"destination_id": person["id"]})
+    return await st.wait_attention(lambda s: s.get("state") == "framed", 20.0)
 
 
 async def s11(args) -> None:
@@ -505,27 +587,37 @@ async def s11(args) -> None:
         stop = asyncio.Event()
         watch = asyncio.create_task(st.attention_watch(stop))
         if args.step == "a":
-            st.cue("step in to about half a metre from the bumper")
+            framed = await engage(st, min_d=0.8, max_d=2.5)
+            st.cue("step in to about half a metre from the bumper and stand still")
             before = (await st.status())["agent"]
             close = await st.wait_attention(lambda s: s.get("distance_m") is not None and s["distance_m"] < 0.85, 30.0)
             recovered = await st.wait_attention(lambda s: s.get("distance_m") is not None and s["distance_m"] >= 0.9 and s.get("state") == "framed", 15.0) if close else None
             after = (await st.status())["agent"]
             moved = math.hypot(after["x"] - before["x"], after["z"] - before["z"]) if before and after else None
-            summary = {"close": close, "recovered": recovered, "slam_moved_m": round(moved, 3) if moved is not None else None}
+            await st.call("cancel_attention")
+            st.measure("bumper -> toes", "after back-up", "then stay where you are")
+            summary = {"framed_first": framed, "close": close, "recovered": recovered, "slam_moved_m": round(moved, 3) if moved is not None else None}
         elif args.step == "b":
-            st.cue("walk off sideways briskly, out of its sight, and stay away until the camera levels")
+            framed = await engage(st)
+            st.cue("walk off sideways briskly, out of its sight, round behind it, and stay away until the camera levels")
             unseen = await st.wait_attention(lambda s: s.get("unseen_s", 0) > 0.5, 40.0)
             t0 = time.time()
             searching = await st.wait_attention(lambda s: s.get("state") in ("searching", "lost"), 15.0)
             lost = await st.wait_attention(lambda s: s.get("state") == "lost", 40.0)
             v = await st.view("after_lost")
-            summary = {"unseen_at": unseen, "searching": searching, "lost": lost, "t_lost_s": round(time.time() - t0, 1) if lost else None, "camera_after": v.get("camera")}
+            summary = {"framed_first": framed, "unseen_at": unseen, "searching": searching, "lost": lost, "t_lost_s": round(time.time() - t0, 1) if lost else None, "camera_after": v.get("camera")}
         else:
-            st.cue("back on the 3.0 mark; the moment the robot turns toward you, walk straight up to the 1.0 mark at a brisk pace and stop")
-            person = await st.wait_label("Person", 120.0, every_s=2.0, min_d=2.3)
+            st.cue("stand about 3 m in front of the robot again (tape bumper -> toes, report it as 'stand: NN cm'); the moment the robot turns toward you, walk straight at it at a brisk pace, stop about 1 m away")
+            if not await st.wait_go("person at 3 m"):
+                stop.set()
+                await watch
+                return
+            person = await st.wait_label("Person", 120.0, every_s=2.0, min_d=2.2)
             await st.call("do_rotate", {"action": "RotateRight", "degrees": 20})
             first = await st.call("set_attention", {"destination_id": person["id"]}) if person else None
             done = await st.wait_attention(lambda s: s.get("state") == "framed" and s.get("distance_m") is not None and s["distance_m"] <= 1.9 and not s.get("moving"), 45.0)
+            await st.call("cancel_attention")
+            st.measure("bumper -> toes", "walk-up stop", "then stay where you are")
             summary = {"first": first, "done": done}
         stop.set()
         samples = await watch
@@ -539,8 +631,10 @@ async def s11(args) -> None:
 
 async def s12(args) -> None:
     async with Station("s12") as st:
-        st.cue("stand on the 2.0 mark; wave both arms from the moment the robot turns to you until it twitches")
-        person = await st.wait_label("Person", 180.0, every_s=2.0)
+        st.cue("stand about 2 m in front of the robot, facing it; tape bumper -> toes, report it as 'stand: NN cm'; then wave both arms from the moment the robot turns to you until it twitches")
+        if not await st.wait_go("person at 2 m"):
+            return
+        person = await st.wait_label("Person", 120.0, every_s=2.0)
         if not person:
             return
         stop = asyncio.Event()
@@ -551,7 +645,14 @@ async def s12(args) -> None:
         standoff = await st.call("set_attention", {"destination_id": person["id"], "standoff_m": 0.8})
         near = await st.wait_attention(lambda s: s.get("state") == "framed" and s.get("distance_m") is not None and s["distance_m"] <= 1.1, 60.0)
         bad = await st.call("set_attention", {"destination_id": person["id"], "standoff_m": 0.5})
-        st.cue("walk slowly 2 m sideways, then 1 m back, and stop")
+        await st.call("cancel_attention")
+        st.measure("bumper -> toes", "standoff 0.8", "stop waving, stay where you are, say 'down'")
+        if not await st.wait_go("standoff gap reported"):
+            stop.set()
+            await watch
+            return
+        st.cue("walk slowly 2 m sideways to the robot's left, then 1 m back toward where you were, and stop facing it")
+        person = next((d for d in (await st.view("before_follow")).get("destinations", []) if d["label"] == "Person"), person)
         follow = await st.call("set_attention", {"destination_id": person["id"], "follow": True})
         replanned = await st.wait_attention(lambda s: s.get("state") == "approaching", 45.0)
         settled = await st.wait_attention(lambda s: s.get("state") == "framed" and s.get("distance_m") is not None and s["distance_m"] <= 1.9 and not s.get("moving"), 60.0)
@@ -598,23 +699,46 @@ async def snap(args) -> None:
         print(json.dumps(await st.status(), indent=1)[:600])
 
 
+async def go(args) -> None:
+    """The user said 'down' (or reported a number): release the station blocked in wait_go()."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    GO_FLAG.touch()
+    print(f"go {clock()} -> {GO_FLAG}")
+
+
+async def report(args) -> None:
+    """Log what the user measured ('MoveAhead 0.5: 48 cm') into the station's jsonl; --go releases it."""
+    station_dir = OUT / args.station_name
+    station_dir.mkdir(parents=True, exist_ok=True)
+    text = " ".join(args.text)
+    numbers = [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", text)]
+    record = {"t": time.time(), "clock": clock(), "kind": "report", "text": text, "numbers": numbers}
+    with (station_dir / f"{args.station_name}.jsonl").open("a") as handle:
+        handle.write(json.dumps(record) + "\n")
+    print(f"report {record['clock']} {args.station_name}: {text}  numbers={numbers}")
+    if args.go:
+        await go(args)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="station", required=True)
-    p = sub.add_parser("s1"); p.add_argument("--round", type=int, default=1); p.set_defaults(fn=s1)
-    p = sub.add_parser("s2"); p.add_argument("--mark", type=float, default=2.0); p.set_defaults(fn=s2)
+    p = sub.add_parser("s1"); p.add_argument("--round", type=int, default=1); p.add_argument("--measured", default=None, help="Label=metres,... the user's tape readings"); p.set_defaults(fn=s1)
+    p = sub.add_parser("s2"); p.add_argument("--distance", type=float, default=2.0, help="target distance in m the user stands at"); p.set_defaults(fn=s2)
     p = sub.add_parser("s3"); p.add_argument("--wall", choices=("left", "right"), default="left"); p.set_defaults(fn=s3)
     sub.add_parser("s4").set_defaults(fn=s4)
     sub.add_parser("s5").set_defaults(fn=s5)
     sub.add_parser("s6").set_defaults(fn=s6)
     sub.add_parser("s7").set_defaults(fn=s7)
-    p = sub.add_parser("s8"); p.add_argument("--speed", action="store_true"); p.set_defaults(fn=s8)
+    p = sub.add_parser("s8"); p.add_argument("--step", choices=("main", "speed"), default="main"); p.set_defaults(fn=s8)
     p = sub.add_parser("s9"); p.add_argument("--step", choices=("a", "b", "c"), required=True); p.add_argument("--goal", default=None); p.set_defaults(fn=s9)
     sub.add_parser("s10").set_defaults(fn=s10)
     p = sub.add_parser("s11"); p.add_argument("--step", choices=("a", "b", "c"), required=True); p.set_defaults(fn=s11)
     sub.add_parser("s12").set_defaults(fn=s12)
     p = sub.add_parser("home"); p.add_argument("--store", action="store_true"); p.set_defaults(fn=home)
     p = sub.add_parser("snap"); p.add_argument("--name", default=None); p.set_defaults(fn=snap)
+    sub.add_parser("go").set_defaults(fn=go)
+    p = sub.add_parser("report"); p.add_argument("station_name"); p.add_argument("text", nargs="+"); p.add_argument("--go", action="store_true"); p.set_defaults(fn=report)
     args = parser.parse_args()
     asyncio.run(args.fn(args))
 
