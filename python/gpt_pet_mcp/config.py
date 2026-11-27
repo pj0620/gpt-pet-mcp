@@ -79,6 +79,14 @@ TF_TIMEOUT_S = 0.3
 ROBOT_MAX_SPEED_MPS = _env_float("GPTPET_MCP_MAX_SPEED_MPS", 0.1)
 """What the robot drives at: Nav2's MPPI vx_max (nav2_params.yaml). set_nav_goal's speed_mps is
 clamped to the contract's range but a drive never goes faster than this."""
+SIDESTEP_MODE = _env_str("GPTPET_MCP_SIDESTEP_MODE", "turn")
+"""How MoveLeft/MoveRight are done: "turn" = turn 90 degrees to that side, drive the distance, turn
+back (the mecanum wheels used like normal wheels; the user's choice 2026-11-27 after the strafes
+slipped 2:1 sideways and yawed); "strafe" = a sideways velocity with the heading hold below."""
+ROTATE_OVERSHOOT_DEG = _env_float("GPTPET_MCP_ROTATE_OVERSHOOT_DEG", 7.0)
+"""Nav2's Spin stops this many degrees late on this robot (measured 2026-11-27: 10 -> 17, 30 -> 37,
+90 -> 100); do_rotate asks for the requested angle minus this. 0 disables the correction."""
+ROTATE_MIN_DEG = 3.0
 STRAFE_SPEED_MPS = _env_float("GPTPET_MCP_STRAFE_SPEED_MPS", 0.07)
 """Lateral speed. The mecanum base slips sideways on hard floor and yaws while it does, so strafes
 go slower than drives and hold their heading (below)."""
@@ -92,6 +100,11 @@ STRAFE_YAW_MAX_WZ = _env_float("GPTPET_MCP_STRAFE_YAW_MAX_WZ", 0.6)
 STRAFE_YAW_ABORT_DEG = _env_float("GPTPET_MCP_STRAFE_YAW_ABORT_DEG", 35.0)
 """A strafe stops (reported as blocked by heading drift) when the hold cannot keep the heading
 within this of the start."""
+STRAFE_SLIP_RATIO = _env_float("GPTPET_MCP_STRAFE_SLIP_RATIO", 1.0)
+"""Odometry sideways travel per metre the body really moves. Mecanum rollers slip sideways on hard
+floor: 2026-11-27 the odometry read 0.34 m for 0.12-0.17 m of real lateral motion (camera parallax
+on fixed objects), so a strafe aims for magnitude x this ratio by odometry and reports magnitude.
+1.0 = trust the odometry."""
 STRAFE_SQUARE_DEG = 3.0  # after a strafe the robot turns back on the spot to within this of its start heading
 STRAFE_SQUARE_MAX_S = 4.0
 PLAN_TIMEOUT_S = 5.0

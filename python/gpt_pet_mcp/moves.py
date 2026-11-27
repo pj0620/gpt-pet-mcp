@@ -65,7 +65,10 @@ class Moves:
         if magnitude < 1e-3:
             return f"Successfully moved 0.00 m {direction}"
         if action in ("MoveLeft", "MoveRight"):
-            return self._strafe(+1.0 if action == "MoveLeft" else -1.0, magnitude, direction)
+            sign = +1.0 if action == "MoveLeft" else -1.0
+            if config.SIDESTEP_MODE == "strafe":
+                return self._strafe(sign, magnitude, direction)
+            return self._sidestep_by_turning(sign, magnitude, direction)
         if action == "MoveAhead":
             client, goal = self._bridge.drive, DriveOnHeading.Goal()
             name = config.DRIVE_ACTION
@@ -96,6 +99,24 @@ class Moves:
             return f"Moved {moved:.2f} of {magnitude:.2f} m {direction}, then blocked by {blocker}"
         return f"Move blocked by {blocker}: did not move"
 
+    def _sidestep_by_turning(self, sign: float, magnitude: float, direction: str) -> str:
+        """MoveLeft/MoveRight without strafing: turn 90 degrees to that side, drive, turn back.
+        The drive's own texts carry over with the side-step's words ("to the left")."""
+        out, back = ("RotateLeft", "RotateRight") if sign > 0 else ("RotateRight", "RotateLeft")
+        start = self._bridge.odom_pose()
+        turned = self.rotate(out, 90.0)
+        if not turned.startswith("Successfully"):
+            return f"Move blocked by an obstacle: could not turn to face {direction} ({turned})"
+        drove = self.move("MoveAhead", magnitude)
+        returned = self.rotate(back, 90.0)
+        if start is not None:
+            self._square_up(start[2])  # the two spins overshoot alike, but not exactly
+        text = drove.replace(" ahead", f" {direction}")
+        if not returned.startswith("Successfully"):
+            text += f" (heading not restored: {returned})"
+        logger.info("Side-step {} {:.2f} m by turning: {} / {} / {}", direction, magnitude, turned, drove, returned)
+        return text
+
     def _strafe(self, sign: float, magnitude: float, direction: str) -> str:
         bridge = self._bridge
         deadline = time.monotonic() + 8.0
@@ -115,10 +136,13 @@ class Moves:
         max_err = 0.0
         kp, max_wz = config.STRAFE_YAW_KP, config.STRAFE_YAW_MAX_WZ
         abort = math.radians(config.STRAFE_YAW_ABORT_DEG)
+        ratio = max(0.2, config.STRAFE_SLIP_RATIO)  # odometry metres per real metre sideways
+        target = magnitude * ratio
         started = time.monotonic()
 
         def lateral(pose: tuple) -> float:
-            return abs((pose[0] - x0) * left[0] + (pose[1] - y0) * left[1])
+            """Real sideways travel estimate: odometry projected on the start's left axis, de-slipped."""
+            return abs((pose[0] - x0) * left[0] + (pose[1] - y0) * left[1]) / ratio
 
         try:
             while True:
@@ -205,8 +229,10 @@ class Moves:
         if not self._bridge.ready(self._bridge.spin):
             return f"Rotate blocked: the robot's drive is not available (/{config.SPIN_ACTION} unavailable)"
         sign = -1.0 if action == "RotateRight" else 1.0  # ROS yaw grows counter-clockwise
+        # Nav2's Spin stops late by a roughly constant angle on this robot; ask for less.
+        commanded = degrees if degrees <= config.ROTATE_MIN_DEG else max(config.ROTATE_MIN_DEG, degrees - config.ROTATE_OVERSHOOT_DEG)
         goal = Spin.Goal()
-        goal.target_yaw = float(sign * math.radians(degrees))
+        goal.target_yaw = float(sign * math.radians(commanded))
         goal.time_allowance = _duration(abs(math.radians(degrees)) / 0.4 * 1.5 + 3.0)
         call = self._bridge.call(self._bridge.spin, goal, config.SPIN_ACTION)
         if not call.wait_accepted(config.ACTION_ACCEPT_TIMEOUT_S) or not call.accepted:
