@@ -245,7 +245,7 @@ def yaw_delta(a: float, b: float) -> float:
 async def s1(args) -> None:
     rounds = {1: ["Box", "Backpack", "Chair"], 2: ["Bottle", "Ball", "HousePlant", "Shoe"]}
     expected = rounds[args.round]
-    marks = {1: {"Box": 1.0, "Backpack": 2.0, "Chair": 3.0}, 2: {"Bottle": 1.0, "Ball": 2.0, "HousePlant": 3.0, "Shoe": math.hypot(2.0, 1.0)}}[args.round]
+    marks = {1: {"Box": 1.0, "Backpack": 2.0, "Chair": 3.0}, 2: {"Bottle": 1.0, "Ball": 2.0, "HousePlant": 3.0, "Shoe": math.hypot(2.0, 0.8)}}[args.round]
     async with Station(f"s1_r{args.round}") as st:
         st.cue(f"round {args.round}: " + ", ".join(f"{k} on {v if k != 'Shoe' else 'the left tick'}" for k, v in marks.items()) + "; then step out of the picture")
         st.note("waiting for the first of the expected labels")
@@ -409,7 +409,7 @@ async def s7(args) -> None:
 
 async def s8(args) -> None:
     async with Station("s8") as st:
-        st.cue("chair on the 2.5 mark, box 1 m to the right of the 1.5 mark; then out of the picture")
+        st.cue("chair on the 2.5 mark, box on the right tick (0.8 m right of the 2.0 mark); then out of the picture")
         chair = await st.wait_label("Chair", 180.0, every_s=2.0)
         box = next((d for d in (await st.view("find_box")).get("destinations", []) if d["label"] == "Box"), None)
         if not chair:
